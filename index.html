@@ -10,9 +10,33 @@
 <body>
   <main class="card">
     <h1>Structured Notes</h1>
-    <p id="env" class="muted">Environment: unknown</p>
-    <button id="pingBtn" type="button">Check connection</button>
-    <p id="result" role="status"></p>
+    <p id="env" class="muted"></p>
+
+    <section id="viewEmail">
+      <form id="emailForm" novalidate>
+        <label for="email">Email address</label>
+        <input id="email" type="email" autocomplete="username" inputmode="email" maxlength="254">
+        <button id="sendBtn" type="submit">Send code</button>
+      </form>
+    </section>
+
+    <section id="viewCode" hidden>
+      <p id="codeHint" class="muted"></p>
+      <form id="codeForm" novalidate>
+        <label for="code">6-digit code</label>
+        <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+        <button id="verifyBtn" type="submit">Sign in</button>
+      </form>
+      <button id="resendBtn" type="button" class="link" disabled>Send a new code</button>
+      <button id="backBtn" type="button" class="link">Use a different email</button>
+    </section>
+
+    <section id="viewHome" hidden>
+      <p id="whoami"></p>
+      <button id="logoutBtn" type="button">Sign out</button>
+    </section>
+
+    <p id="msg" role="status"></p>
   </main>
   <script src="config.js"></script>
   <script src="app.js"></script>
