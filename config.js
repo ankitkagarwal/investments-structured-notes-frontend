@@ -1,4 +1,4 @@
 window.APP_CONFIG = {
-  apiUrl: "PASTE_THE_API_DEPLOYMENT_URL_HERE",
+  apiUrl: "https://script.google.com/macros/s/AKfycbwoTskQEgTvKqZHZ_NA55_Kra4zpSXbM6DV_YbShkEFMTvVaBQdx-Kv-Smi65XsrYCLVA/exec",
   environment: "TEST"
 };
