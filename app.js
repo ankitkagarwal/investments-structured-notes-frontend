@@ -8,6 +8,7 @@
   var views = { email: $("viewEmail"), code: $("viewCode"), home: $("viewHome") };
 
   function showView(name) {
+    $("viewLoading").hidden = true;
     Object.keys(views).forEach(function (k) { views[k].hidden = (k !== name); });
     setMsg("");
     if (name === "email") $("email").focus();
