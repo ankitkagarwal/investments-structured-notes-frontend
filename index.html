@@ -3,38 +3,55 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://script.google.com https://script.googleusercontent.com; base-uri 'none'; form-action 'none'">
   <title>Structured Notes</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <main class="card">
-    <h1>Structured Notes</h1>
-    <p id="env" class="muted"></p>
+    <div class="topline">
+      <p class="brand">Structured Notes</p>
+      <p id="env" class="envtag" title="Environment" hidden></p>
+    </div>
+    <h1 id="title" hidden></h1>
 
     <p id="viewLoading" class="muted">Loading...</p>
 
     <section id="viewEmail" hidden>
+      <p class="muted">Enter your email and we'll send a 6-digit code.</p>
       <form id="emailForm" novalidate>
-        <label for="email">Email address</label>
-        <input id="email" type="email" autocomplete="username" inputmode="email" maxlength="254">
-        <button id="sendBtn" type="submit">Send code</button>
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username" inputmode="email" maxlength="254" placeholder="name@company.com">
+        <button id="sendBtn" class="primary" type="submit">Send code</button>
       </form>
+      <p class="note">Investor access is coming soon.</p>
     </section>
 
     <section id="viewCode" hidden>
       <p id="codeHint" class="muted"></p>
       <form id="codeForm" novalidate>
-        <label for="code">6-digit code</label>
-        <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
-        <button id="verifyBtn" type="submit">Sign in</button>
+        <div id="codeGroup" role="group" aria-labelledby="codeLabel">
+          <span id="codeLabel" class="sr">6-digit code</span>
+          <div class="codeboxes">
+            <input class="cbox" type="text" inputmode="numeric" autocomplete="one-time-code" aria-label="Digit 1 of 6">
+            <input class="cbox" type="text" inputmode="numeric" autocomplete="off" aria-label="Digit 2 of 6">
+            <input class="cbox" type="text" inputmode="numeric" autocomplete="off" aria-label="Digit 3 of 6">
+            <input class="cbox" type="text" inputmode="numeric" autocomplete="off" aria-label="Digit 4 of 6">
+            <input class="cbox" type="text" inputmode="numeric" autocomplete="off" aria-label="Digit 5 of 6">
+            <input class="cbox" type="text" inputmode="numeric" autocomplete="off" aria-label="Digit 6 of 6">
+          </div>
+        </div>
+        <button id="verifyBtn" class="primary" type="submit">Verify and sign in</button>
       </form>
-      <button id="resendBtn" type="button" class="link" disabled>Send a new code</button>
-      <button id="backBtn" type="button" class="link">Use a different email</button>
+      <div class="linkrow">
+        <button id="resendBtn" type="button" class="link" disabled>Send a new code</button>
+        <button id="backBtn" type="button" class="link">Use a different email</button>
+      </div>
     </section>
 
     <section id="viewHome" hidden>
-      <p id="whoami"></p>
+      <p id="whoami" class="muted small"></p>
       <nav id="nav" class="nav">
         <button type="button" class="navbtn active" data-page="tasks">Tasks <span id="taskBadge" class="badge" title="">...</span></button>
         <button type="button" class="navbtn" data-page="notes">Notes</button>
@@ -44,7 +61,7 @@
       </nav>
       <p id="pageTitle" class="pagetitle">Tasks</p>
       <p id="pageBody" class="muted">Coming soon.</p>
-      <button id="logoutBtn" type="button">Sign out</button>
+      <button id="logoutBtn" type="button" class="secondary">Sign out</button>
     </section>
 
     <p id="msg" role="status"></p>
