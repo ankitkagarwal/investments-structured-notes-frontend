@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="card">
+  <main id="card" class="card">
     <div class="topline">
       <p class="brand">Structured Notes</p>
       <p id="env" class="envtag" title="Environment" hidden></p>
@@ -61,7 +61,17 @@
       </nav>
       <p id="pageTitle" class="pagetitle">Tasks</p>
       <p id="pageBody" class="muted">Coming soon.</p>
-      <button id="logoutBtn" type="button" class="secondary">Sign out</button>
+      <div id="notesPage" hidden>
+        <form id="isinForm" class="isinform" novalidate>
+          <div class="isinfield">
+            <label for="isin">ISIN</label>
+            <input id="isin" type="text" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="US0378331005">
+          </div>
+          <button id="isinBtn" class="primary inline" type="submit">Search</button>
+        </form>
+        <div id="noteResult"></div>
+      </div>
+      <button id="logoutBtn" type="button" class="secondary auto">Sign out</button>
     </section>
 
     <p id="msg" role="status"></p>
