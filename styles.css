@@ -18,3 +18,7 @@ input { width:100%; box-sizing:border-box; padding:12px; margin:0 0 14px; border
 input#code { letter-spacing:.4em; text-align:center; font-size:1.3rem; }
 button.link { background:none; color:var(--accent); padding:10px 0 0; text-align:left; width:auto; display:block; }
 button.link:disabled { color:var(--muted); cursor:default; }
+.tasksline { margin:0 0 16px; }
+.badge { display:inline-block; min-width:1.6em; padding:2px 8px; border-radius:999px; text-align:center; font-size:.85rem; background:var(--muted); color:#fff; }
+.badge.has-tasks { background:var(--err); }
+.badge.unknown { background:var(--muted); opacity:.7; }
