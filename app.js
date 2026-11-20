@@ -27,7 +27,6 @@
       return;
     }
     if (r.error && r.error.code === "UNAUTHENTICATED") {
-      badgeSeq++;
       clearToken(); email = "";
       showView("email");
       setMsg("Your session has ended. Please sign in again.");
@@ -130,17 +129,12 @@
     }
   });
 
-  function showHome(me) {
-    var until = me.expiresAt ? new Date(me.expiresAt).toLocaleString() : "";
-    $("whoami").textContent = "Signed in as " + me.subject + " (" + me.role + ")" + (until ? ". Session ends " + until + "." : "");
-    showView("home");
-  }
-
   $("logoutBtn").addEventListener("click", async function () {
     var btn = $("logoutBtn");
     busy(btn, true);
     if (token) await callApi("auth.logout", {}, token);
     busy(btn, false);
+    badgeSeq++;
     clearToken(); email = "";
     showView("email");
     setMsg("Signed out.", "ok");
