@@ -35,7 +35,15 @@
 
     <section id="viewHome" hidden>
       <p id="whoami"></p>
-      <p class="tasksline">Open tasks <span id="taskBadge" class="badge" title="">...</span></p>
+      <nav id="nav" class="nav">
+        <button type="button" class="navbtn active" data-page="tasks">Tasks <span id="taskBadge" class="badge" title="">...</span></button>
+        <button type="button" class="navbtn" data-page="notes">Notes</button>
+        <button type="button" class="navbtn" data-page="investors">Investors</button>
+        <button type="button" class="navbtn" data-page="payouts">Payouts</button>
+        <button type="button" class="navbtn" data-page="charges">Charges</button>
+      </nav>
+      <p id="pageTitle" class="pagetitle">Tasks</p>
+      <p id="pageBody" class="muted">Coming soon.</p>
       <button id="logoutBtn" type="button">Sign out</button>
     </section>
 
