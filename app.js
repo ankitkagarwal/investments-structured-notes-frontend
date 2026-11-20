@@ -7,12 +7,40 @@
   function $(id) { return document.getElementById(id); }
   var views = { email: $("viewEmail"), code: $("viewCode"), home: $("viewHome") };
 
-  function showView(name) {
-    $("viewLoading").hidden = true;
-    Object.keys(views).forEach(function (k) { views[k].hidden = (k !== name); });
-    setMsg("");
-    if (name === "email") $("email").focus();
-    if (name === "code") { $("code").value = ""; $("code").focus(); }
+  var badgeSeq = 0;
+
+  function setBadge(text, state, title) {
+    var b = $("taskBadge");
+    b.textContent = text;
+    b.className = "badge" + (state ? " " + state : "");
+    b.title = title || "";
+  }
+
+  async function loadTaskBadge() {
+    var seq = ++badgeSeq, tok = token;
+    setBadge("...", "", "Loading tasks");
+    var r = await callApi("admin.tasks", {}, tok);
+    if (seq !== badgeSeq || tok !== token) return; // signed out or superseded meanwhile
+    if (r.ok && r.data && r.data.counts && typeof r.data.counts.total === "number") {
+      var n = r.data.counts.total;
+      setBadge(String(n), n > 0 ? "has-tasks" : "", n + (n === 1 ? " open task" : " open tasks"));
+      return;
+    }
+    if (r.error && r.error.code === "UNAUTHENTICATED") {
+      badgeSeq++;
+      clearToken(); email = "";
+      showView("email");
+      setMsg("Your session has ended. Please sign in again.");
+      return;
+    }
+    setBadge("?", "unknown", "Could not load tasks");
+  }
+
+  function showHome(me) {
+    var until = me.expiresAt ? new Date(me.expiresAt).toLocaleString() : "";
+    $("whoami").textContent = "Signed in as " + me.subject + " (" + me.role + ")" + (until ? ". Session ends " + until + "." : "");
+    showView("home");
+    loadTaskBadge();
   }
   function setMsg(text, cls) { var m = $("msg"); m.textContent = text || ""; m.className = cls || ""; }
   function busy(btn, on) { btn.disabled = on; }
