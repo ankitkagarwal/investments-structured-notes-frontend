@@ -16,6 +16,26 @@
 
   var badgeSeq = 0;
 
+  var PAGES = { tasks: "Tasks", notes: "Notes", investors: "Investors", payouts: "Payouts", charges: "Charges" };
+
+  function showPage(name) {
+    if (!PAGES[name]) name = "tasks";
+    $("pageTitle").textContent = PAGES[name];
+    $("pageBody").textContent = "Coming soon.";
+    var btns = document.querySelectorAll("#nav .navbtn");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle("active", btns[i].getAttribute("data-page") === name);
+    }
+  }
+  
+$("nav").addEventListener("click", function (ev) {
+  var b = ev.target.closest("button[data-page]");
+  if (!b) return;
+  var page = b.getAttribute("data-page");
+  showPage(page);
+  if (page === "tasks") loadTaskBadge();
+});
+
   function setBadge(text, state, title) {
     var b = $("taskBadge");
     b.textContent = text;
@@ -25,7 +45,9 @@
 
   async function loadTaskBadge() {
     var seq = ++badgeSeq, tok = token;
-    setBadge("...", "", "Loading tasks");
+    var first = $("taskBadge").textContent === "...";
+    if (first) setBadge("...", "", "Loading tasks");
+    else $("taskBadge").title = "Refreshing";
     var r = await callApi("admin.tasks", {}, tok);
     if (seq !== badgeSeq || tok !== token) return; // signed out or superseded meanwhile
     if (r.ok && r.data && r.data.counts && typeof r.data.counts.total === "number") {
@@ -46,6 +68,7 @@
     var until = me.expiresAt ? new Date(me.expiresAt).toLocaleString() : "";
     $("whoami").textContent = "Signed in as " + me.subject + " (" + me.role + ")" + (until ? ". Session ends " + until + "." : "");
     showView("home");
+    showPage("tasks");
     loadTaskBadge();
   }
   function setMsg(text, cls) { var m = $("msg"); m.textContent = text || ""; m.className = cls || ""; }
