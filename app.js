@@ -6,12 +6,48 @@
 
   function $(id) { return document.getElementById(id); }
   var views = { email: $("viewEmail"), code: $("viewCode"), home: $("viewHome") };
+  var TITLES = { email: "Sign in", code: "Check your email" };
+  var boxes = Array.prototype.slice.call(document.querySelectorAll(".cbox"));
+
+  function getCode() { return boxes.map(function (b) { return b.value; }).join(""); }
+  function clearCode() {
+    boxes.forEach(function (b) { b.value = ""; });
+    $("codeGroup").classList.remove("invalid");
+  }
+  function fillFrom(i, digits) {
+    for (var k = 0; k < digits.length && i + k < boxes.length; k++) boxes[i + k].value = digits.charAt(k);
+    boxes[Math.min(i + digits.length, boxes.length - 1)].focus();
+  }
+  boxes.forEach(function (b, i) {
+    b.addEventListener("input", function (ev) {
+      $("codeGroup").classList.remove("invalid");
+      var d = b.value.replace(/\D/g, "");
+      if (ev.inputType === "insertText" && d.length > 1) d = d.slice(-1);
+      b.value = "";
+      if (d) fillFrom(i, d);
+    });
+    b.addEventListener("keydown", function (ev) {
+      if (ev.key === "Backspace" && b.value === "" && i > 0) {
+        ev.preventDefault();
+        boxes[i - 1].value = "";
+        boxes[i - 1].focus();
+      } else if (ev.key === "ArrowLeft" && i > 0) {
+        ev.preventDefault(); boxes[i - 1].focus();
+      } else if (ev.key === "ArrowRight" && i < boxes.length - 1) {
+        ev.preventDefault(); boxes[i + 1].focus();
+      }
+    });
+    b.addEventListener("focus", function () { b.select(); });
+  });
+
   function showView(name) {
     $("viewLoading").hidden = true;
     Object.keys(views).forEach(function (k) { views[k].hidden = (k !== name); });
+    $("title").hidden = !TITLES[name];
+    $("title").textContent = TITLES[name] || "";
     setMsg("");
     if (name === "email") $("email").focus();
-    if (name === "code") { $("code").value = ""; $("code").focus(); }
+    if (name === "code") { clearCode(); boxes[0].focus(); }
   }
 
   var badgeSeq = 0;
@@ -27,14 +63,14 @@
       btns[i].classList.toggle("active", btns[i].getAttribute("data-page") === name);
     }
   }
-  
-$("nav").addEventListener("click", function (ev) {
-  var b = ev.target.closest("button[data-page]");
-  if (!b) return;
-  var page = b.getAttribute("data-page");
-  showPage(page);
-  if (page === "tasks") loadTaskBadge();
-});
+
+  $("nav").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-page]");
+    if (!b) return;
+    var page = b.getAttribute("data-page");
+    showPage(page);
+    if (page === "tasks") loadTaskBadge();
+  });
 
   function setBadge(text, state, title) {
     var b = $("taskBadge");
@@ -143,8 +179,12 @@ $("nav").addEventListener("click", function (ev) {
 
   $("codeForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
-    var code = $("code").value.trim();
-    if (!/^[0-9]{6}$/.test(code)) { setMsg("Enter the 6-digit code.", "err"); return; }
+    var code = getCode();
+    if (!/^[0-9]{6}$/.test(code)) {
+      $("codeGroup").classList.add("invalid");
+      setMsg("Enter the 6-digit code.", "err");
+      return;
+    }
     var btn = $("verifyBtn");
     busy(btn, true); setMsg("Checking...");
     var r = await callApi("auth.verifyOtp", { email: email, code: code });
@@ -154,7 +194,9 @@ $("nav").addEventListener("click", function (ev) {
       clearInterval(cooldownTimer);
       showHome({ role: r.data.role, subject: r.data.subject, expiresAt: r.data.expiresAt });
     } else {
-      $("code").value = "";
+      clearCode();
+      $("codeGroup").classList.add("invalid");
+      boxes[0].focus();
       setMsg(errText(r.error), "err");
     }
   });
@@ -171,7 +213,10 @@ $("nav").addEventListener("click", function (ev) {
   });
 
   async function start() {
-    $("env").textContent = "Environment: " + (cfg.environment || "unknown");
+    if (cfg.environment) {
+      $("env").textContent = String(cfg.environment).toUpperCase();
+      $("env").hidden = false;
+    }
     if (!cfg.apiUrl || cfg.apiUrl.indexOf("https://script.google.com/") !== 0) {
       showView("email"); setMsg("config.js has no valid API URL.", "err"); return;
     }
