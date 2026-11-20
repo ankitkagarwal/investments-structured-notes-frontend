@@ -45,6 +45,8 @@
     Object.keys(views).forEach(function (k) { views[k].hidden = (k !== name); });
     $("title").hidden = !TITLES[name];
     $("title").textContent = TITLES[name] || "";
+    $("card").classList.toggle("wide", name === "home");
+    if (name !== "home") resetNotes();
     setMsg("");
     if (name === "email") $("email").focus();
     if (name === "code") { clearCode(); boxes[0].focus(); }
@@ -57,7 +59,9 @@
   function showPage(name) {
     if (!PAGES[name]) name = "tasks";
     $("pageTitle").textContent = PAGES[name];
-    $("pageBody").textContent = "Coming soon.";
+    $("pageBody").textContent = name === "notes" ? "Look up a note by its ISIN. Read-only for now." : "Coming soon.";
+    $("notesPage").hidden = name !== "notes";
+    if (name === "notes") $("isin").focus();
     var btns = document.querySelectorAll("#nav .navbtn");
     for (var i = 0; i < btns.length; i++) {
       btns[i].classList.toggle("active", btns[i].getAttribute("data-page") === name);
@@ -91,14 +95,104 @@
       setBadge(String(n), n > 0 ? "has-tasks" : "", n + (n === 1 ? " open task" : " open tasks"));
       return;
     }
-    if (r.error && r.error.code === "UNAUTHENTICATED") {
-      clearToken(); email = "";
-      showView("email");
-      setMsg("Your session has ended. Please sign in again.");
-      return;
-    }
+    if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
     setBadge("?", "unknown", "Could not load tasks");
   }
+
+  function sessionEnded() {
+    clearToken(); email = "";
+    showView("email");
+    setMsg("Your session has ended. Please sign in again.");
+  }
+
+  var noteSeq = 0;
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== null && text !== undefined) e.textContent = text;
+    return e;
+  }
+  function val(v) { return (v === null || v === undefined || String(v).trim() === "") ? "\u2014" : String(v); }
+  function phone(isd, num) { return (isd && num) ? "+" + isd + " " + num : "\u2014"; }
+  function facts(obj, keys) {
+    var dl = el("dl", "facts");
+    keys.forEach(function (k) {
+      var d = el("div");
+      d.appendChild(el("dt", null, k));
+      d.appendChild(el("dd", null, val(obj[k])));
+      dl.appendChild(d);
+    });
+    return dl;
+  }
+  function block(title, node) {
+    var s = el("section", "block");
+    s.appendChild(el("h3", null, title));
+    s.appendChild(node);
+    return s;
+  }
+  function table(label, cols, rows) {
+    var wrap = el("div", "tablewrap"), t = el("table"), hr = el("tr"), tb = el("tbody");
+    t.setAttribute("aria-label", label);
+    cols.forEach(function (c) { var th = el("th", null, c); th.scope = "col"; hr.appendChild(th); });
+    var thead = el("thead"); thead.appendChild(hr); t.appendChild(thead);
+    if (!rows.length) {
+      var tr0 = el("tr"), td0 = el("td", null, "None.");
+      td0.colSpan = cols.length; tr0.appendChild(td0); tb.appendChild(tr0);
+    }
+    rows.forEach(function (row) {
+      var tr = el("tr");
+      row.forEach(function (cell) { tr.appendChild(el("td", null, val(cell))); });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); wrap.appendChild(t);
+    return wrap;
+  }
+  function clearNote() { var r = $("noteResult"); while (r.firstChild) r.removeChild(r.firstChild); }
+  function resetNotes() { noteSeq++; clearNote(); $("isin").value = ""; $("isinBtn").disabled = false; }
+
+  function renderNote(d) {
+    var h = d.header || {}, profiles = d.profiles || [], byId = {}, out = $("noteResult");
+    profiles.forEach(function (p) { byId[p["Investor ID"]] = p; });
+    function who(id) {
+      var p = byId[id];
+      return p ? (String(p["First Name"] || "") + " " + String(p["Last Name"] || "")).trim() + " (" + id + ")" : id;
+    }
+    clearNote();
+    var head = el("div", "notehead");
+    head.appendChild(el("h2", null, val(h.ISIN)));
+    if (h.Currency) head.appendChild(el("span", "envtag", String(h.Currency)));
+    out.appendChild(head);
+    out.appendChild(block("Note details", facts(h, ["Initial Fixing Date", "Issue Date", "Term (Months)", "Final Fixing Date", "Redemption Date", "Redemption Barrier %"])));
+    out.appendChild(block("Coupon", facts(h, ["Coupon Barrier %", "Yearly Coupon Rate %", "Coupon Frequency (Months)", "Coupon Roll Day", "In-Memory Applicable", "Coupon Barrier Drop %", "Coupon Barrier Drop Start Date", "Coupon Barrier Limit %"])));
+    out.appendChild(block("Early redemption", facts(h, ["Early Redemption Applicable", "Early Redemption Memory Knock-In Applicable", "Early Redemption Start Month", "Early Redemption Frequency", "Early Redemption Barrier %", "Early Redemption Drop %", "Early Redemption Drop Start Date", "Early Redemption Barrier Limit %"])));
+    out.appendChild(block("Underlyings", table("Underlyings", ["Company", "Exchange", "Ticker", "Buy price"],
+      (d.underlyings || []).map(function (u) { return [u["Company Name"], u["Stock Exchange"], u.Ticker, u["Buy Price (Initial Fixing Level)"]]; }))));
+    out.appendChild(block("Investments", table("Investments", ["Investment ID", "Investor", "Amount", "NAV%", "Face value", "Start date"],
+      (d.investments || []).map(function (x) { return [x.Investment_ID, who(x["Investor ID"]), x.Amount, x["NAV%"], x["Face Value"], x["Start Date"]]; }))));
+    out.appendChild(block("Investors", table("Investors", ["Investor ID", "Name", "Email", "Contact", "WhatsApp", "Email consent", "WhatsApp consent", "Coupon consent", "ER consent", "Redemption consent"],
+      profiles.map(function (p) {
+        return [p["Investor ID"], (String(p["First Name"] || "") + " " + String(p["Last Name"] || "")).trim(), p["Email ID"],
+          phone(p["Contact Number ISD Code"], p["Contact Number"]), phone(p["WhatsApp Number ISD Code"], p["WhatsApp Number"]),
+          p["Email Consent"], p["WhatsApp Consent"], p["Communication Consent - Coupon Payout"],
+          p["Communication Consent - Early Redemption Payout"], p["Communication Consent - Redemption Payout"]];
+      }))));
+  }
+
+  $("isinForm").addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    var isin = $("isin").value.trim().toUpperCase();
+    $("isin").value = isin;
+    if (!/^[A-Z0-9]{12}$/.test(isin)) { setMsg("Enter a 12-character ISIN (letters and digits).", "err"); return; }
+    var seq = ++noteSeq, tok = token, btn = $("isinBtn");
+    busy(btn, true); setMsg("Searching..."); clearNote();
+    var r = await callApi("note.get", { isin: isin }, tok);
+    busy(btn, false);
+    if (seq !== noteSeq || tok !== token) return; // signed out or superseded meanwhile
+    if (r.ok && r.data) { setMsg(""); renderNote(r.data); return; }
+    if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
+    if (r.error && r.error.code === "NOT_FOUND") { setMsg("No note found for " + isin + ".", "err"); return; }
+    setMsg(errText(r.error), "err");
+  });
 
   function showHome(me) {
     var until = me.expiresAt ? new Date(me.expiresAt).toLocaleString() : "";
