@@ -117,9 +117,10 @@
   function facts(obj, keys) {
     var dl = el("dl", "facts");
     keys.forEach(function (k) {
+      var key = Array.isArray(k) ? k[0] : k, label = Array.isArray(k) ? k[1] : k;
       var d = el("div");
-      d.appendChild(el("dt", null, k));
-      d.appendChild(el("dd", null, val(obj[k])));
+      d.appendChild(el("dt", null, label));
+      d.appendChild(el("dd", null, val(obj[key])));
       dl.appendChild(d);
     });
     return dl;
@@ -164,7 +165,16 @@
     out.appendChild(head);
     out.appendChild(block("Note details", facts(h, ["Initial Fixing Date", "Issue Date", "Term (Months)", "Final Fixing Date", "Redemption Date", "Redemption Barrier %"])));
     out.appendChild(block("Coupon", facts(h, ["Coupon Barrier %", "Yearly Coupon Rate %", "Coupon Frequency (Months)", "Coupon Roll Day", "In-Memory Applicable", "Coupon Barrier Drop %", "Coupon Barrier Drop Start Date", "Coupon Barrier Limit %"])));
-    out.appendChild(block("Early redemption", facts(h, ["Early Redemption Applicable", "Early Redemption Memory Knock-In Applicable", "Early Redemption Start Month", "Early Redemption Frequency", "Early Redemption Barrier %", "Early Redemption Drop %", "Early Redemption Drop Start Date", "Early Redemption Barrier Limit %"])));
+    out.appendChild(block("Early Redemption (ER)", facts(h, [
+      ["Early Redemption Applicable", "ER Applicable"],
+      ["Early Redemption Memory Knock-In Applicable", "ER Memory Knock-In Applicable"],
+      ["Early Redemption Start Month", "ER Start Month"],
+      ["Early Redemption Frequency", "ER Frequency"],
+      ["Early Redemption Barrier %", "ER Barrier %"],
+      ["Early Redemption Drop %", "ER Drop %"],
+      ["Early Redemption Drop Start Date", "ER Drop Start Date"],
+      ["Early Redemption Barrier Limit %", "ER Barrier Limit %"]
+    ])));
     out.appendChild(block("Underlyings", table("Underlyings", ["Company", "Exchange", "Ticker", "Buy price"],
       (d.underlyings || []).map(function (u) { return [u["Company Name"], u["Stock Exchange"], u.Ticker, u["Buy Price (Initial Fixing Level)"]]; }))));
     out.appendChild(block("Investments", table("Investments", ["Investment ID", "Investor", "Amount", "NAV%", "Face value", "Start date"],
