@@ -5,6 +5,10 @@
   var token = null, email = "", cooldownTimer = null;
 
   function $(id) { return document.getElementById(id); }
+  window.addEventListener("error", function (ev) {
+    var l = $("viewLoading");
+    if (l && !l.hidden) l.textContent = "The page could not start (" + (ev.message || "script error") + "). Try a hard refresh (Ctrl+Shift+R). If it continues, a file is missing from the site.";
+  });
   var views = { email: $("viewEmail"), code: $("viewCode"), home: $("viewHome") };
   var TITLES = { email: "Sign in", code: "Check your email" };
   var boxes = Array.prototype.slice.call(document.querySelectorAll(".cbox"));
@@ -219,7 +223,7 @@
   var EDIT = [["contactIsdCode", "eCIsd"], ["contactNumber", "eCNum"], ["whatsappIsdCode", "eWIsd"], ["whatsappNumber", "eWNum"],
     ["emailConsent", "pill_emailConsent"], ["whatsappConsent", "pill_whatsappConsent"], ["couponConsent", "pill_couponConsent"],
     ["earlyConsent", "pill_earlyConsent"], ["redemptionConsent", "pill_redemptionConsent"]];
-  var ISDS = { contactIsdCode: IsdField.attach($("eCIsd")), whatsappIsdCode: IsdField.attach($("eWIsd")) };
+  var ISDS = window.IsdField ? { contactIsdCode: IsdField.attach($("eCIsd")), whatsappIsdCode: IsdField.attach($("eWIsd")) } : {};
 
   function setPills(group, v) {
     Array.prototype.forEach.call(group.querySelectorAll("button"), function (b) {
@@ -296,7 +300,10 @@
     setMsg(""); setDMsg("Loading...");
     var r = await callApi("investor.get", { investorId: id }, tok);
     if (seq !== detailSeq || tok !== token) return;
-    if (r.ok && r.data && r.data.investor) { setDMsg(""); fillDetail(r.data); return; }
+    if (r.ok && r.data && r.data.investor) {
+      if (!window.IsdField) { setDMsg("The country selector did not load. Hard refresh (Ctrl+Shift+R), and check that isd.js and countries.js are on the site.", "err"); return; }
+      setDMsg(""); fillDetail(r.data); return;
+    }
     if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
     showInvestorList();
     setMsg(r.error && r.error.code === "NOT_FOUND" ? "Investor not found. Refresh the list." : errText(r.error), "err");
