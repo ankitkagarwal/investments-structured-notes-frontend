@@ -72,6 +72,7 @@
         <div id="noteResult"></div>
       </div>
       <div id="investorsPage" hidden>
+        <div id="investorList">
         <form id="investorForm" class="isinform" novalidate>
           <div class="isinfield">
             <label for="invQuery">Filter</label>
@@ -81,6 +82,58 @@
         </form>
         <p id="invCount" class="muted small count"></p>
         <div id="investorResult"></div>
+        </div>
+        <div id="investorDetail" hidden>
+          <button id="invBack" type="button" class="link back">&larr; All investors</button>
+          <div class="notehead"><h2 id="dName"></h2><span id="dId" class="envtag"></span></div>
+          <p id="dMsg" role="status"></p>
+          <div id="dBody" hidden>
+            <div id="dFacts"></div>
+            <p class="muted small count">Name and email can't be changed here.</p>
+            <form id="invEditForm" novalidate>
+              <section class="block">
+                <h3>Contact details</h3>
+                <div class="formgrid">
+                  <div class="field"><label for="eCIsd">Contact ISD code</label><input id="eCIsd" list="isdList" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+                  <div class="field"><label for="eCNum">Contact number</label><input id="eCNum" inputmode="numeric" maxlength="15" autocomplete="off"></div>
+                  <div class="field"><label for="eWIsd">WhatsApp ISD code</label><input id="eWIsd" list="isdList" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+                  <div class="field"><label for="eWNum">WhatsApp number</label><input id="eWNum" inputmode="numeric" maxlength="15" autocomplete="off"></div>
+                </div>
+              </section>
+              <section class="block">
+                <h3>Communication consent</h3>
+                <div class="formgrid">
+                  <div class="field"><label for="eEmailC">Email</label><select id="eEmailC"><option value="Y">Yes</option><option value="N">No</option></select></div>
+                  <div class="field"><label for="eWaC">WhatsApp</label><select id="eWaC"><option value="Y">Yes</option><option value="N">No</option></select></div>
+                  <div class="field"><label for="eCouponC">Coupon payout</label><select id="eCouponC"><option value="Y">Yes</option><option value="N">No</option></select></div>
+                  <div class="field"><label for="eErC">ER payout</label><select id="eErC"><option value="Y">Yes</option><option value="N">No</option></select></div>
+                  <div class="field"><label for="eRedC">Redemption payout</label><select id="eRedC"><option value="Y">Yes</option><option value="N">No</option></select></div>
+                </div>
+              </section>
+              <div class="actions">
+                <button id="dSave" class="primary inline" type="submit">Save changes</button>
+                <button id="dCancel" class="secondary auto" type="button">Back</button>
+              </div>
+            </form>
+            <section class="block">
+              <h3>Active investments</h3>
+              <div id="dInv"></div>
+            </section>
+          </div>
+          <datalist id="isdList">
+            <option value="971">United Arab Emirates</option><option value="91">India</option><option value="44">United Kingdom</option>
+            <option value="1">United States / Canada</option><option value="966">Saudi Arabia</option><option value="974">Qatar</option>
+            <option value="968">Oman</option><option value="973">Bahrain</option><option value="965">Kuwait</option>
+            <option value="65">Singapore</option><option value="852">Hong Kong</option><option value="61">Australia</option>
+            <option value="49">Germany</option><option value="33">France</option><option value="41">Switzerland</option>
+            <option value="39">Italy</option><option value="34">Spain</option><option value="31">Netherlands</option>
+            <option value="92">Pakistan</option><option value="94">Sri Lanka</option><option value="880">Bangladesh</option>
+            <option value="977">Nepal</option><option value="20">Egypt</option><option value="962">Jordan</option>
+            <option value="961">Lebanon</option><option value="27">South Africa</option><option value="86">China</option>
+            <option value="81">Japan</option><option value="82">South Korea</option><option value="60">Malaysia</option>
+            <option value="66">Thailand</option><option value="63">Philippines</option><option value="7">Russia / Kazakhstan</option>
+          </datalist>
+        </div>
       </div>
       <button id="logoutBtn" type="button" class="secondary auto">Sign out</button>
     </section>
