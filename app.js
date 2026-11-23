@@ -217,11 +217,33 @@
   // ---- Investor detail and edit (investor.get / investor.update) ----
   var detailSeq = 0, detailSnap = null, detailId = "";
   var EDIT = [["contactIsdCode", "eCIsd"], ["contactNumber", "eCNum"], ["whatsappIsdCode", "eWIsd"], ["whatsappNumber", "eWNum"],
-    ["emailConsent", "eEmailC"], ["whatsappConsent", "eWaC"], ["couponConsent", "eCouponC"], ["earlyConsent", "eErC"], ["redemptionConsent", "eRedC"]];
+    ["emailConsent", "pill_emailConsent"], ["whatsappConsent", "pill_whatsappConsent"], ["couponConsent", "pill_couponConsent"],
+    ["earlyConsent", "pill_earlyConsent"], ["redemptionConsent", "pill_redemptionConsent"]];
+  var ISDS = { contactIsdCode: IsdField.attach($("eCIsd")), whatsappIsdCode: IsdField.attach($("eWIsd")) };
+
+  function setPills(group, v) {
+    Array.prototype.forEach.call(group.querySelectorAll("button"), function (b) {
+      b.setAttribute("aria-checked", b.getAttribute("data-v") === v ? "true" : "false");
+    });
+  }
+  function getF(p) {
+    if (ISDS[p[0]]) return ISDS[p[0]].getCode();
+    var e = $(p[1]);
+    if (e.classList.contains("pills")) {
+      var b = e.querySelector('[aria-checked="true"]');
+      return b ? b.getAttribute("data-v") : "";
+    }
+    return e.value.trim();
+  }
+  function setF(p, v) {
+    if (ISDS[p[0]]) { ISDS[p[0]].setCode(v); return; }
+    var e = $(p[1]);
+    if (e.classList.contains("pills")) setPills(e, v); else e.value = v;
+  }
 
   function setDMsg(t, cls) { var m = $("dMsg"); m.textContent = t || ""; m.className = cls || ""; }
   function fmtTs(s) { if (!s) return ""; var d = new Date(s); return isNaN(d.getTime()) ? String(s) : d.toLocaleString(); }
-  function formVals() { var o = {}; EDIT.forEach(function (p) { o[p[0]] = $(p[1]).value.trim(); }); return o; }
+  function formVals() { var o = {}; EDIT.forEach(function (p) { o[p[0]] = getF(p); }); return o; }
   function formDirty() {
     if (!detailSnap) return false;
     var v = formVals();
@@ -239,7 +261,7 @@
     var who = [["contact", "Contact"], ["whatsapp", "WhatsApp"]];
     for (var i = 0; i < who.length; i++) {
       var isd = v[who[i][0] + "IsdCode"], num = v[who[i][0] + "Number"], n = who[i][1];
-      if (!/^\d{1,4}$/.test(isd)) return n + " ISD code must be 1 to 4 digits, for example 971.";
+      if (!/^\d{1,4}$/.test(isd)) return "Choose the " + n + " ISD code from the list.";
       if (!/^\d+$/.test(num)) return n + " number must be digits only.";
       if ((isd + num).length > 15) return n + " number including the ISD code cannot exceed 15 digits.";
     }
@@ -256,7 +278,7 @@
     EDIT.forEach(function (p) {
       var v = inv[p[0]] == null ? "" : String(inv[p[0]]);
       if (p[0].indexOf("Consent") !== -1 && v !== "Y" && v !== "N") v = "N";
-      $(p[1]).value = v;
+      setF(p, v);
     });
     detailSnap = formVals();
     var host = $("dInv"); while (host.firstChild) host.removeChild(host.firstChild);
@@ -282,7 +304,11 @@
 
   $("invBack").addEventListener("click", leaveDetail);
   $("dCancel").addEventListener("click", leaveDetail);
-  ["eCIsd", "eCNum", "eWIsd", "eWNum"].forEach(function (id) {
+  $("invEditForm").addEventListener("click", function (ev) {
+    var b = ev.target.closest(".pills button");
+    if (b) setPills(b.parentNode, b.getAttribute("data-v"));
+  });
+  ["eCNum", "eWNum"].forEach(function (id) {
     $(id).addEventListener("input", function () { var c = this.value.replace(/\D/g, ""); if (c !== this.value) this.value = c; });
   });
   $("invEditForm").addEventListener("submit", async function (ev) {
