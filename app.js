@@ -140,7 +140,7 @@
     s.appendChild(node);
     return s;
   }
-  function table(label, cols, rows) {
+  function table(label, cols, rows, onOpen) {
     var wrap = el("div", "tablewrap"), t = el("table"), hr = el("tr"), tb = el("tbody");
     t.setAttribute("aria-label", label);
     cols.forEach(function (c) { var th = el("th", null, c); th.scope = "col"; hr.appendChild(th); });
@@ -149,9 +149,18 @@
       var tr0 = el("tr"), td0 = el("td", null, "None.");
       td0.colSpan = cols.length; tr0.appendChild(td0); tb.appendChild(tr0);
     }
-    rows.forEach(function (row) {
+    rows.forEach(function (row, ri) {
       var tr = el("tr");
-      row.forEach(function (cell) { tr.appendChild(el("td", null, val(cell))); });
+      row.forEach(function (cell, ci) {
+        var td = el("td");
+        if (onOpen && ci === 0) {
+          var b = el("button", "link rowlink", val(cell));
+          b.type = "button";
+          b.addEventListener("click", function () { onOpen(ri); });
+          td.appendChild(b);
+        } else td.textContent = val(cell);
+        tr.appendChild(td);
+      });
       tb.appendChild(tr);
     });
     t.appendChild(tb); wrap.appendChild(t);
@@ -199,7 +208,104 @@
 
   var investorSeq = 0, investorsLoaded = false, allInvestors = [];
   function clearInvestors() { var r = $("investorResult"); while (r.firstChild) r.removeChild(r.firstChild); $("invCount").textContent = ""; }
-  function resetInvestors() { investorSeq++; investorsLoaded = false; allInvestors = []; clearInvestors(); $("invQuery").value = ""; $("invBtn").disabled = false; }
+  function resetInvestors() {
+    investorSeq++; detailSeq++; investorsLoaded = false; allInvestors = [];
+    clearInvestors(); $("invQuery").value = ""; $("invBtn").disabled = false;
+    showInvestorList();
+  }
+
+  // ---- Investor detail and edit (investor.get / investor.update) ----
+  var detailSeq = 0, detailSnap = null, detailId = "";
+  var EDIT = [["contactIsdCode", "eCIsd"], ["contactNumber", "eCNum"], ["whatsappIsdCode", "eWIsd"], ["whatsappNumber", "eWNum"],
+    ["emailConsent", "eEmailC"], ["whatsappConsent", "eWaC"], ["couponConsent", "eCouponC"], ["earlyConsent", "eErC"], ["redemptionConsent", "eRedC"]];
+
+  function setDMsg(t, cls) { var m = $("dMsg"); m.textContent = t || ""; m.className = cls || ""; }
+  function fmtTs(s) { if (!s) return ""; var d = new Date(s); return isNaN(d.getTime()) ? String(s) : d.toLocaleString(); }
+  function formVals() { var o = {}; EDIT.forEach(function (p) { o[p[0]] = $(p[1]).value.trim(); }); return o; }
+  function formDirty() {
+    if (!detailSnap) return false;
+    var v = formVals();
+    return EDIT.some(function (p) { return v[p[0]] !== detailSnap[p[0]]; });
+  }
+  function showInvestorList() {
+    $("investorDetail").hidden = true; $("investorList").hidden = false;
+    $("dBody").hidden = true; detailSnap = null; detailId = ""; setDMsg("");
+  }
+  function leaveDetail() {
+    if (formDirty() && !confirm("Discard unsaved changes?")) return;
+    showInvestorList();
+  }
+  function validateEdit(v) {
+    var who = [["contact", "Contact"], ["whatsapp", "WhatsApp"]];
+    for (var i = 0; i < who.length; i++) {
+      var isd = v[who[i][0] + "IsdCode"], num = v[who[i][0] + "Number"], n = who[i][1];
+      if (!/^\d{1,4}$/.test(isd)) return n + " ISD code must be 1 to 4 digits, for example 971.";
+      if (!/^\d+$/.test(num)) return n + " number must be digits only.";
+      if ((isd + num).length > 15) return n + " number including the ISD code cannot exceed 15 digits.";
+    }
+    return "";
+  }
+
+  function fillDetail(d) {
+    var inv = d.investor || {};
+    $("dName").textContent = (String(inv.firstName || "") + " " + String(inv.lastName || "")).trim();
+    $("dId").textContent = val(inv.investorId);
+    var f = $("dFacts"); while (f.firstChild) f.removeChild(f.firstChild);
+    var info = { "Email": inv.email, "Portal access": inv.portalAccess, "Created": fmtTs(inv.createdTimestamp), "Last modified": fmtTs(inv.modifiedTimestamp) };
+    f.appendChild(facts(info, ["Email", "Portal access", "Created", "Last modified"]));
+    EDIT.forEach(function (p) {
+      var v = inv[p[0]] == null ? "" : String(inv[p[0]]);
+      if (p[0].indexOf("Consent") !== -1 && v !== "Y" && v !== "N") v = "N";
+      $(p[1]).value = v;
+    });
+    detailSnap = formVals();
+    var host = $("dInv"); while (host.firstChild) host.removeChild(host.firstChild);
+    host.appendChild(table("Active investments", ["Investment ID", "ISIN", "Amount", "NAV%", "Face value", "Start date"],
+      (d.investments || []).map(function (x) { return [x.investmentId, x.isin, x.amount, x.nav, x.faceValue, x.startDate]; })));
+    allInvestors = allInvestors.map(function (p) { return p.investorId === inv.investorId ? inv : p; });
+    $("dBody").hidden = false;
+  }
+
+  async function openInvestor(id) {
+    var seq = ++detailSeq, tok = token;
+    detailId = id; detailSnap = null;
+    $("investorList").hidden = true; $("investorDetail").hidden = false; $("dBody").hidden = true;
+    $("dName").textContent = ""; $("dId").textContent = id;
+    setMsg(""); setDMsg("Loading...");
+    var r = await callApi("investor.get", { investorId: id }, tok);
+    if (seq !== detailSeq || tok !== token) return;
+    if (r.ok && r.data && r.data.investor) { setDMsg(""); fillDetail(r.data); return; }
+    if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
+    showInvestorList();
+    setMsg(r.error && r.error.code === "NOT_FOUND" ? "Investor not found. Refresh the list." : errText(r.error), "err");
+  }
+
+  $("invBack").addEventListener("click", leaveDetail);
+  $("dCancel").addEventListener("click", leaveDetail);
+  ["eCIsd", "eCNum", "eWIsd", "eWNum"].forEach(function (id) {
+    $(id).addEventListener("input", function () { var c = this.value.replace(/\D/g, ""); if (c !== this.value) this.value = c; });
+  });
+  $("invEditForm").addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    var v = formVals(), bad = validateEdit(v);
+    if (bad) { setDMsg(bad, "err"); return; }
+    if (!formDirty()) { setDMsg("No changes to save."); return; }
+    var seq = ++detailSeq, tok = token, id = detailId, btn = $("dSave"), p = { investorId: id };
+    EDIT.forEach(function (e) { p[e[0]] = v[e[0]]; });
+    busy(btn, true); setDMsg("Saving...");
+    var r = await callApi("investor.update", p, tok);
+    busy(btn, false);
+    if (seq !== detailSeq || tok !== token || detailId !== id) return;
+    if (r.ok) {
+      var g = await callApi("investor.get", { investorId: id }, tok);
+      if (seq !== detailSeq || tok !== token || detailId !== id) return;
+      if (g.ok && g.data && g.data.investor) { fillDetail(g.data); setDMsg("Saved.", "ok"); }
+      else { detailSnap = v; setDMsg("Saved. The details could not be refreshed.", "ok"); }
+      return;
+    }
+    if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
+    setDMsg(errText(r.error), "err");
+  });
 
   // Filters the list already in memory: every typed word must appear in the ID, name or email.
   function filterInvestors() {
@@ -224,7 +330,7 @@
         return [p.investorId, (String(p.firstName || "") + " " + String(p.lastName || "")).trim(), p.email,
           phone(p.contactIsdCode, p.contactNumber), phone(p.whatsappIsdCode, p.whatsappNumber),
           p.emailConsent, p.whatsappConsent, p.couponConsent, p.earlyConsent, p.redemptionConsent, p.portalAccess];
-      })));
+      }), function (i) { openInvestor(list[i].investorId); }));
   }
 
   async function loadInvestors() {
