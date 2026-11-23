@@ -61,7 +61,7 @@
     $("pageTitle").textContent = PAGES[name];
     var BODY = {
       notes: "Look up a note by its ISIN. Read-only for now.",
-      investors: "Search by ID, name or email, or leave blank to list everyone. Read-only for now."
+      investors: "Type to filter by ID, name or email. Read-only for now."
     };
     $("pageBody").textContent = BODY[name] || "Coming soon.";
     $("notesPage").hidden = name !== "notes";
@@ -69,7 +69,7 @@
     if (name === "notes") $("isin").focus();
     if (name === "investors") {
       $("invQuery").focus();
-      if (!investorsLoaded) loadInvestors("");
+      if (!investorsLoaded) loadInvestors();
     }
     var btns = document.querySelectorAll("#nav .navbtn");
     for (var i = 0; i < btns.length; i++) {
@@ -197,14 +197,27 @@
       }))));
   }
 
-  var investorSeq = 0, investorsLoaded = false;
+  var investorSeq = 0, investorsLoaded = false, allInvestors = [];
   function clearInvestors() { var r = $("investorResult"); while (r.firstChild) r.removeChild(r.firstChild); $("invCount").textContent = ""; }
-  function resetInvestors() { investorSeq++; investorsLoaded = false; clearInvestors(); $("invQuery").value = ""; $("invBtn").disabled = false; }
+  function resetInvestors() { investorSeq++; investorsLoaded = false; allInvestors = []; clearInvestors(); $("invQuery").value = ""; $("invBtn").disabled = false; }
 
-  function renderInvestors(list, query) {
+  // Filters the list already in memory: every typed word must appear in the ID, name or email.
+  function filterInvestors() {
+    var q = $("invQuery").value.trim();
+    var tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+    var list = tokens.length ? allInvestors.filter(function (p) {
+      var hay = [p.investorId, p.firstName, p.lastName, p.email].join(" ").toLowerCase();
+      return tokens.every(function (t) { return hay.indexOf(t) !== -1; });
+    }) : allInvestors;
+    renderInvestors(list, q, allInvestors.length);
+  }
+
+  function renderInvestors(list, query, total) {
     clearInvestors();
     var n = list.length;
-    $("invCount").textContent = (n === 1 ? "1 investor" : n + " investors") + (query ? " matching \u201c" + query + "\u201d" : "");
+    $("invCount").textContent = query
+      ? n + " of " + total + (total === 1 ? " investor" : " investors")
+      : total + (total === 1 ? " investor" : " investors");
     $("investorResult").appendChild(table("Investors",
       ["Investor ID", "Name", "Email", "Contact", "WhatsApp", "Email consent", "WhatsApp consent", "Coupon consent", "ER consent", "Redemption consent", "Portal access"],
       list.map(function (p) {
@@ -214,26 +227,26 @@
       })));
   }
 
-  async function loadInvestors(query) {
+  async function loadInvestors() {
     var seq = ++investorSeq, tok = token, btn = $("invBtn");
     busy(btn, true); setMsg("Loading...");
-    var r = await callApi("investor.list", { query: query }, tok);
+    var r = await callApi("investor.list", { query: "" }, tok);
     busy(btn, false);
     if (seq !== investorSeq || tok !== token) return; // signed out or superseded meanwhile
     if (r.ok && r.data && Array.isArray(r.data.investors)) {
-      setMsg(""); investorsLoaded = true; renderInvestors(r.data.investors, query); return;
+      setMsg(""); investorsLoaded = true; allInvestors = r.data.investors; filterInvestors(); return;
     }
     if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
     clearInvestors();
     setMsg(errText(r.error), "err");
   }
 
-  $("investorForm").addEventListener("submit", function (ev) {
-    ev.preventDefault();
-    var q = $("invQuery").value.trim();
-    if (q.length === 1) { setMsg("Enter at least 2 characters, or leave blank to list everyone.", "err"); return; }
-    loadInvestors(q);
+  $("investorForm").addEventListener("submit", function (ev) { ev.preventDefault(); });
+  $("invQuery").addEventListener("input", function () { if (investorsLoaded) filterInvestors(); });
+  $("invQuery").addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && $("invQuery").value) { $("invQuery").value = ""; if (investorsLoaded) filterInvestors(); }
   });
+  $("invBtn").addEventListener("click", function () { loadInvestors(); });
 
   $("isinForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
