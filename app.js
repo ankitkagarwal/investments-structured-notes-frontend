@@ -46,7 +46,7 @@
     $("title").hidden = !TITLES[name];
     $("title").textContent = TITLES[name] || "";
     $("card").classList.toggle("wide", name === "home");
-    if (name !== "home") resetNotes();
+    if (name !== "home") { resetNotes(); resetInvestors(); }
     setMsg("");
     if (name === "email") $("email").focus();
     if (name === "code") { clearCode(); boxes[0].focus(); }
@@ -59,9 +59,18 @@
   function showPage(name) {
     if (!PAGES[name]) name = "tasks";
     $("pageTitle").textContent = PAGES[name];
-    $("pageBody").textContent = name === "notes" ? "Look up a note by its ISIN. Read-only for now." : "Coming soon.";
+    var BODY = {
+      notes: "Look up a note by its ISIN. Read-only for now.",
+      investors: "Search by ID, name or email, or leave blank to list everyone. Read-only for now."
+    };
+    $("pageBody").textContent = BODY[name] || "Coming soon.";
     $("notesPage").hidden = name !== "notes";
+    $("investorsPage").hidden = name !== "investors";
     if (name === "notes") $("isin").focus();
+    if (name === "investors") {
+      $("invQuery").focus();
+      if (!investorsLoaded) loadInvestors("");
+    }
     var btns = document.querySelectorAll("#nav .navbtn");
     for (var i = 0; i < btns.length; i++) {
       btns[i].classList.toggle("active", btns[i].getAttribute("data-page") === name);
@@ -187,6 +196,44 @@
           p["Communication Consent - Early Redemption Payout"], p["Communication Consent - Redemption Payout"]];
       }))));
   }
+
+  var investorSeq = 0, investorsLoaded = false;
+  function clearInvestors() { var r = $("investorResult"); while (r.firstChild) r.removeChild(r.firstChild); $("invCount").textContent = ""; }
+  function resetInvestors() { investorSeq++; investorsLoaded = false; clearInvestors(); $("invQuery").value = ""; $("invBtn").disabled = false; }
+
+  function renderInvestors(list, query) {
+    clearInvestors();
+    var n = list.length;
+    $("invCount").textContent = (n === 1 ? "1 investor" : n + " investors") + (query ? " matching \u201c" + query + "\u201d" : "");
+    $("investorResult").appendChild(table("Investors",
+      ["Investor ID", "Name", "Email", "Contact", "WhatsApp", "Email consent", "WhatsApp consent", "Coupon consent", "ER consent", "Redemption consent", "Portal access"],
+      list.map(function (p) {
+        return [p.investorId, (String(p.firstName || "") + " " + String(p.lastName || "")).trim(), p.email,
+          phone(p.contactIsdCode, p.contactNumber), phone(p.whatsappIsdCode, p.whatsappNumber),
+          p.emailConsent, p.whatsappConsent, p.couponConsent, p.earlyConsent, p.redemptionConsent, p.portalAccess];
+      })));
+  }
+
+  async function loadInvestors(query) {
+    var seq = ++investorSeq, tok = token, btn = $("invBtn");
+    busy(btn, true); setMsg("Loading...");
+    var r = await callApi("investor.list", { query: query }, tok);
+    busy(btn, false);
+    if (seq !== investorSeq || tok !== token) return; // signed out or superseded meanwhile
+    if (r.ok && r.data && Array.isArray(r.data.investors)) {
+      setMsg(""); investorsLoaded = true; renderInvestors(r.data.investors, query); return;
+    }
+    if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
+    clearInvestors();
+    setMsg(errText(r.error), "err");
+  }
+
+  $("investorForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var q = $("invQuery").value.trim();
+    if (q.length === 1) { setMsg("Enter at least 2 characters, or leave blank to list everyone.", "err"); return; }
+    loadInvestors(q);
+  });
 
   $("isinForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
