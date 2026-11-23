@@ -71,6 +71,17 @@
         </form>
         <div id="noteResult"></div>
       </div>
+      <div id="investorsPage" hidden>
+        <form id="investorForm" class="isinform" novalidate>
+          <div class="isinfield">
+            <label for="invQuery">Search</label>
+            <input id="invQuery" type="text" maxlength="50" autocomplete="off" spellcheck="false" placeholder="ID, name or email">
+          </div>
+          <button id="invBtn" class="primary inline" type="submit">Search</button>
+        </form>
+        <p id="invCount" class="muted small count"></p>
+        <div id="investorResult"></div>
+      </div>
       <button id="logoutBtn" type="button" class="secondary auto">Sign out</button>
     </section>
 
