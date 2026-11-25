@@ -231,12 +231,13 @@ button, input { transition: border-color 0.12s ease, box-shadow 0.12s ease, back
   z-index: 9500;
   max-height: 220px;
   overflow-y: auto;
+  overflow-x: hidden;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: 0 12px 28px rgba(11, 22, 32, 0.16);
 }
-.isdopt { padding: 9px 12px; color: var(--text); font-size: 0.9375rem; cursor: pointer; }
+.isdopt { padding: 9px 12px; color: var(--text); font-size: 0.9375rem; line-height: 1.35; overflow-wrap: anywhere; cursor: pointer; }
 .isdopt:hover, .isdopt.active { background: var(--cream); }
 .isdempty { padding: 10px 12px; color: var(--muted); font-size: 0.875rem; }
 .lbl { display: block; margin: 0 0 6px; color: #4a453b; font-size: 0.875rem; font-weight: 600; }
