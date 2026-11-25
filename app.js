@@ -287,10 +287,25 @@
     return validateEdit(v);
   }
 
+  // Duplicate key is first name + last name + email (as on the server). Checked against the
+  // list already in memory, ignoring case; the server check still runs on save.
+  function findDuplicate(v) {
+    if (!investorsLoaded) return null;
+    function key(f, l, e) { return [f, l, e].map(function (s) { return String(s || "").trim().toLowerCase(); }).join("|"); }
+    var k = key(v.firstName, v.lastName, v.email);
+    for (var i = 0; i < allInvestors.length; i++) {
+      var p = allInvestors[i];
+      if (key(p.firstName, p.lastName, p.email) === k) return p;
+    }
+    return null;
+  }
+
   async function submitAdd() {
     syncWa();
     var v = formVals(), bad = validateAdd(v);
     if (bad) { setDMsg(bad, "err"); return; }
+    var dup = findDuplicate(v);
+    if (dup) { setDMsg("This investor already exists as " + dup.investorId + " (same first name, last name and email).", "err"); return; }
     var seq = ++detailSeq, tok = token, btn = $("dSave"), inv = {};
     IDENT.concat(EDIT).forEach(function (e) { inv[e[0]] = v[e[0]]; });
     busy(btn, true); setDMsg("Adding...");
