@@ -79,6 +79,7 @@
             <input id="invQuery" type="text" maxlength="50" autocomplete="off" spellcheck="false" placeholder="Type an ID, name or email">
           </div>
           <button id="invBtn" class="secondary auto" type="button">Refresh</button>
+          <button id="invAddBtn" class="primary inline" type="button">Add investor</button>
         </form>
         <p id="invCount" class="muted small count"></p>
         <div id="investorResult"></div>
@@ -89,8 +90,16 @@
           <p id="dMsg" role="status"></p>
           <div id="dBody" hidden>
             <div id="dFacts"></div>
-            <p class="muted small count">Name and email can't be changed here.</p>
+            <p id="dLockNote" class="muted small count">Name and email can't be changed here.</p>
             <form id="invEditForm" novalidate>
+              <section id="eIdentity" class="block" hidden>
+                <h3>Investor</h3>
+                <div class="formgrid">
+                  <div class="field"><label for="eFirst">First name</label><input id="eFirst" type="text" maxlength="25" autocomplete="off" spellcheck="false"></div>
+                  <div class="field"><label for="eLast">Last name</label><input id="eLast" type="text" maxlength="25" autocomplete="off" spellcheck="false"></div>
+                  <div class="field"><label for="eEmail">Email</label><input id="eEmail" type="email" inputmode="email" maxlength="254" autocomplete="off" spellcheck="false" placeholder="name@company.com"></div>
+                </div>
+              </section>
               <section class="block">
                 <h3>Contact details</h3>
                 <div class="formgrid">
@@ -115,7 +124,7 @@
                 <button id="dCancel" class="secondary auto" type="button">Back</button>
               </div>
             </form>
-            <section class="block">
+            <section id="dInvBlock" class="block">
               <h3>Active investments</h3>
               <div id="dInv"></div>
             </section>
