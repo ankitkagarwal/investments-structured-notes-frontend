@@ -230,6 +230,7 @@
   var CONSENTS = ["emailConsent", "whatsappConsent", "couponConsent", "earlyConsent", "redemptionConsent"];
   var DEFAULT_ISD = "971"; // United Arab Emirates, as in the legacy form
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  var NAME_RE = /^[A-Za-z]+$/; // same rule as validateInvestor_ in Code.gs
   var addMode = false, waManual = false, waLast = { isd: "", num: "" };
 
   function setAddMode(on) {
@@ -276,8 +277,10 @@
 
   function validateAdd(v) {
     if (!v.firstName) return "First name is required.";
+    if (!NAME_RE.test(v.firstName)) return "First name can contain letters A to Z only (no digits, spaces or symbols).";
     if (v.firstName.length > 25) return "First name cannot exceed 25 characters.";
     if (!v.lastName) return "Last name is required.";
+    if (!NAME_RE.test(v.lastName)) return "Last name can contain letters A to Z only (no digits, spaces or symbols).";
     if (v.lastName.length > 25) return "Last name cannot exceed 25 characters.";
     if (!v.email) return "Email is required.";
     if (v.email.length > 254 || !EMAIL_RE.test(v.email)) return "Enter a valid email address.";
