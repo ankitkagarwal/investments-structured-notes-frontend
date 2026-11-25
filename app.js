@@ -65,7 +65,7 @@
     $("pageTitle").textContent = PAGES[name];
     var BODY = {
       notes: "Look up a note by its ISIN. Read-only for now.",
-      investors: "Type to filter by ID, name or email. Read-only for now."
+      investors: "Type to filter by ID, name or email. Open an investor to edit, or add a new one."
     };
     $("pageBody").textContent = BODY[name] || "Coming soon.";
     $("notesPage").hidden = name !== "notes";
@@ -225,6 +225,87 @@
     ["earlyConsent", "pill_earlyConsent"], ["redemptionConsent", "pill_redemptionConsent"]];
   var ISDS = window.IsdField ? { contactIsdCode: IsdField.attach($("eCIsd")), whatsappIsdCode: IsdField.attach($("eWIsd")) } : {};
 
+  // ---- Add mode (investor.add): same form, plus name and email ----
+  var IDENT = [["firstName", "eFirst"], ["lastName", "eLast"], ["email", "eEmail"]];
+  var CONSENTS = ["emailConsent", "whatsappConsent", "couponConsent", "earlyConsent", "redemptionConsent"];
+  var DEFAULT_ISD = "971"; // United Arab Emirates, as in the legacy form
+  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  var addMode = false, waManual = false, waLast = { isd: "", num: "" };
+
+  function setAddMode(on) {
+    addMode = on;
+    $("eIdentity").hidden = !on;
+    $("dLockNote").hidden = on;
+    $("dFacts").hidden = on;
+    $("dInvBlock").hidden = on;
+    $("dSave").textContent = on ? "Add investor" : "Save changes";
+  }
+
+  // Contact ISD and number copy into WhatsApp until WhatsApp is changed by hand.
+  // A WhatsApp value that differs from the last copied one means it was edited.
+  function syncWa() {
+    if (!addMode || waManual || $("dBody").hidden || !ISDS.whatsappIsdCode) return;
+    var wIsd = ISDS.whatsappIsdCode.getCode(), wNum = $("eWNum").value;
+    if (wIsd !== waLast.isd || wNum !== waLast.num) { waManual = true; return; }
+    var cIsd = ISDS.contactIsdCode.getCode(), cNum = $("eCNum").value;
+    if (cIsd && cIsd !== wIsd) ISDS.whatsappIsdCode.setCode(cIsd);
+    if (cNum !== wNum) $("eWNum").value = cNum;
+    waLast = { isd: ISDS.whatsappIsdCode.getCode(), num: $("eWNum").value };
+  }
+  ["input", "change", "click", "keyup", "focusout"].forEach(function (t) {
+    document.addEventListener(t, function () { if (addMode) setTimeout(syncWa, 0); }, true);
+  });
+
+  function openAddInvestor() {
+    if (!window.IsdField) { setMsg("The country selector did not load. Hard refresh (Ctrl+Shift+R), and check that isd.js and countries.js are on the site.", "err"); return; }
+    detailSeq++; detailId = "";
+    setMsg(""); setDMsg("");
+    $("investorList").hidden = true; $("investorDetail").hidden = false;
+    $("dName").textContent = "New investor"; $("dId").textContent = "New";
+    setAddMode(true);
+    IDENT.forEach(function (p) { $(p[1]).value = ""; });
+    setF(["contactIsdCode"], DEFAULT_ISD); setF(["whatsappIsdCode"], DEFAULT_ISD);
+    $("eCNum").value = ""; $("eWNum").value = "";
+    CONSENTS.forEach(function (k) { setPills($("pill_" + k), "N"); });
+    waManual = false;
+    waLast = { isd: ISDS.whatsappIsdCode.getCode(), num: "" };
+    $("dBody").hidden = false;
+    detailSnap = formVals();
+    $("eFirst").focus();
+  }
+
+  function validateAdd(v) {
+    if (!v.firstName) return "First name is required.";
+    if (v.firstName.length > 25) return "First name cannot exceed 25 characters.";
+    if (!v.lastName) return "Last name is required.";
+    if (v.lastName.length > 25) return "Last name cannot exceed 25 characters.";
+    if (!v.email) return "Email is required.";
+    if (v.email.length > 254 || !EMAIL_RE.test(v.email)) return "Enter a valid email address.";
+    return validateEdit(v);
+  }
+
+  async function submitAdd() {
+    syncWa();
+    var v = formVals(), bad = validateAdd(v);
+    if (bad) { setDMsg(bad, "err"); return; }
+    var seq = ++detailSeq, tok = token, btn = $("dSave"), inv = {};
+    IDENT.concat(EDIT).forEach(function (e) { inv[e[0]] = v[e[0]]; });
+    busy(btn, true); setDMsg("Adding...");
+    var r = await callApi("investor.add", { investor: inv }, tok);
+    busy(btn, false);
+    if (seq !== detailSeq || tok !== token || !addMode) return;
+    if (r.ok && r.data && r.data.investorId) {
+      var id = r.data.investorId;
+      detailSnap = null; setAddMode(false);
+      loadInvestors();
+      openInvestor(id, "Investor " + id + " added.");
+      return;
+    }
+    if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
+    if (r.error && r.error.code === "CONFLICT") { setDMsg("An investor with this first name, last name and email already exists.", "err"); return; }
+    setDMsg(errText(r.error), "err");
+  }
+
   function setPills(group, v) {
     Array.prototype.forEach.call(group.querySelectorAll("button"), function (b) {
       b.setAttribute("aria-checked", b.getAttribute("data-v") === v ? "true" : "false");
@@ -247,15 +328,20 @@
 
   function setDMsg(t, cls) { var m = $("dMsg"); m.textContent = t || ""; m.className = cls || ""; }
   function fmtTs(s) { if (!s) return ""; var d = new Date(s); return isNaN(d.getTime()) ? String(s) : d.toLocaleString(); }
-  function formVals() { var o = {}; EDIT.forEach(function (p) { o[p[0]] = getF(p); }); return o; }
+  function formVals() {
+    var o = {};
+    (addMode ? IDENT.concat(EDIT) : EDIT).forEach(function (p) { o[p[0]] = getF(p); });
+    return o;
+  }
   function formDirty() {
     if (!detailSnap) return false;
     var v = formVals();
-    return EDIT.some(function (p) { return v[p[0]] !== detailSnap[p[0]]; });
+    return Object.keys(detailSnap).some(function (k) { return v[k] !== detailSnap[k]; });
   }
   function showInvestorList() {
     $("investorDetail").hidden = true; $("investorList").hidden = false;
     $("dBody").hidden = true; detailSnap = null; detailId = ""; setDMsg("");
+    setAddMode(false);
   }
   function leaveDetail() {
     if (formDirty() && !confirm("Discard unsaved changes?")) return;
@@ -292,8 +378,9 @@
     $("dBody").hidden = false;
   }
 
-  async function openInvestor(id) {
+  async function openInvestor(id, doneMsg) {
     var seq = ++detailSeq, tok = token;
+    setAddMode(false);
     detailId = id; detailSnap = null;
     $("investorList").hidden = true; $("investorDetail").hidden = false; $("dBody").hidden = true;
     $("dName").textContent = ""; $("dId").textContent = id;
@@ -302,7 +389,7 @@
     if (seq !== detailSeq || tok !== token) return;
     if (r.ok && r.data && r.data.investor) {
       if (!window.IsdField) { setDMsg("The country selector did not load. Hard refresh (Ctrl+Shift+R), and check that isd.js and countries.js are on the site.", "err"); return; }
-      setDMsg(""); fillDetail(r.data); return;
+      fillDetail(r.data); setDMsg(doneMsg || "", doneMsg ? "ok" : ""); return;
     }
     if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
     showInvestorList();
@@ -320,6 +407,7 @@
   });
   $("invEditForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
+    if (addMode) { submitAdd(); return; }
     var v = formVals(), bad = validateEdit(v);
     if (bad) { setDMsg(bad, "err"); return; }
     if (!formDirty()) { setDMsg("No changes to save."); return; }
@@ -386,6 +474,7 @@
     if (ev.key === "Escape" && $("invQuery").value) { $("invQuery").value = ""; if (investorsLoaded) filterInvestors(); }
   });
   $("invBtn").addEventListener("click", function () { loadInvestors(); });
+  $("invAddBtn").addEventListener("click", openAddInvestor);
 
   $("isinForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
