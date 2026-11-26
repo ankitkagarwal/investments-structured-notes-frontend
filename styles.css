@@ -253,3 +253,103 @@ button, input { transition: border-color 0.12s ease, box-shadow 0.12s ease, back
   font-weight: 600;
 }
 .pills button[aria-checked="true"] { color: var(--gold-dark); background: var(--cream); box-shadow: inset 0 0 0 1px var(--line); }
+/* Date field (datefield.js): text + calendar button on desktop, native picker on phones */
+.datefield { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 6px; min-width: 0; }
+.datefield .dftext {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+.datefield .dftext:focus, .datefield .mobiledate:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px var(--ring); }
+button.calbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+button.calbtn:hover { background: var(--page); }
+button.calbtn[aria-expanded="true"] { border-color: var(--ink); background: var(--cream); }
+.datefield .mobiledate { display: none; }
+.datefield .invalid { border-color: var(--err); background: var(--err-bg); }
+@media (max-width: 620px) {
+  .datefield { grid-template-columns: minmax(0, 1fr); }
+  .datefield .dftext, .datefield .calbtn { display: none; }
+  .datefield .mobiledate {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: 44px;
+    padding: 0 10px;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font: inherit;
+    font-size: 16px; /* 16px stops iOS zooming into the field */
+    -webkit-appearance: none;
+    appearance: none;
+  }
+}
+
+.calpop {
+  position: fixed;
+  z-index: 9500;
+  width: 280px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 12px 28px rgba(11, 22, 32, 0.16);
+  font-size: 0.875rem;
+}
+.calhead { display: flex; align-items: center; gap: 4px; margin: 0 0 8px; }
+.caltitle { flex: 1; color: var(--ink); font-weight: 600; text-align: center; }
+button.calnav {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 1rem;
+  line-height: 1;
+}
+button.calnav:hover { background: var(--page); }
+.calgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.caldow { padding: 4px 0; color: var(--muted); font-size: 0.75rem; font-weight: 600; text-align: center; }
+button.calday {
+  height: 32px;
+  padding: 0;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+button.calday:hover { background: var(--cream); }
+button.calday.today { box-shadow: inset 0 0 0 1px var(--gold); }
+button.calday.selected { color: var(--cream); background: var(--ink); }
+button.calday.off { color: #b9b1a0; cursor: not-allowed; }
+button.calday.off:hover { background: transparent; }
+.calfoot { display: flex; justify-content: space-between; margin-top: 8px; }
+.calfoot button {
+  padding: 4px 6px;
+  color: var(--gold-dark);
+  background: transparent;
+  border: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.calfoot button:disabled { color: var(--muted); cursor: not-allowed; }
