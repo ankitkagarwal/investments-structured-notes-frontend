@@ -353,3 +353,9 @@ button.calday.off:hover { background: transparent; }
   font-weight: 600;
 }
 .calfoot button:disabled { color: var(--muted); cursor: not-allowed; }
+
+/* Investor picker (investorpick.js): reuses the .isdpop list look */
+.pickopt { display: flex; gap: 10px; align-items: baseline; }
+.pickopt strong { flex: none; color: var(--ink); font-weight: 600; }
+.pickopt span { min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+.field input.invalid { border-color: var(--err); background: var(--err-bg); }
