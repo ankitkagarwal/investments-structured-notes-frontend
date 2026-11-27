@@ -245,7 +245,14 @@
     return [String(investorId || "").toUpperCase(), Number(amount).toFixed(2), Number(nav).toFixed(6), d ? DateField.format(d) : ""].join("|");
   }
 
-  function notesDirty() { return !!inv && (inv.rows.length > 0 || Object.keys(inv.removed).length > 0); }
+  // A new row nobody has touched (no investor, amount or date, NAV% still 100) is ignored on Save.
+  function rowBlank(r) {
+    var nav = r.nav.value.trim();
+    return !r.picker.getId() && !r.picker.input.value.trim() && !r.amount.value.trim() &&
+      (nav === "" || nav === "100") && !r.date.input.value.trim();
+  }
+  function activeRows() { return inv ? inv.rows.filter(function (r) { return !rowBlank(r); }) : []; }
+  function notesDirty() { return !!inv && (activeRows().length > 0 || Object.keys(inv.removed).length > 0); }
   window.addEventListener("beforeunload", function (ev) { if (notesDirty()) { ev.preventDefault(); ev.returnValue = ""; } });
 
   function closeModifyPopups() {
@@ -350,7 +357,6 @@
     actions.appendChild(save); actions.appendChild(cancel);
     s.appendChild(actions);
 
-    addRow(false);
     updatePending();
   }
 
@@ -441,7 +447,7 @@
       i.addEventListener("input", function () {
         var c = i.value.replace(/[^\d.]/g, "");
         if (c !== i.value) i.value = c;
-        refreshFace(); showRowErrors(r, {}, i === r.amount ? "amount" : "nav");
+        refreshFace(); showRowErrors(r, {}, i === r.amount ? "amount" : "nav"); updatePending();
       });
     });
     r.amount.addEventListener("blur", function () { showRowErrors(r, rowErrors(r), "amount"); updatePending(); });
@@ -488,7 +494,7 @@
 
   function updatePending() {
     if (!inv) return;
-    var a = inv.rows.length, rm = Object.keys(inv.removed).length, p = [];
+    var a = activeRows().length, rm = Object.keys(inv.removed).length, p = [];
     if (a) p.push(a + (a === 1 ? " investment" : " investments") + " to add");
     if (rm) p.push(rm + " to remove (" + Object.keys(inv.removed).join(", ") + ")");
     $("invPending").textContent = p.length ? "Pending: " + p.join("; ") + "." : "No changes yet.";
@@ -502,13 +508,20 @@
   }
 
   // Server messages number the new investments "Investment row N"; the screen calls them "New N".
-  function screenText(msg) { return String(msg || "").replace(/Investment row (\d+)/g, "New investment $1"); }
+  // Untouched rows are not sent, so the server's row N is the Nth row actually sent.
+  function screenText(msg, sent) {
+    return String(msg || "").replace(/Investment row (\d+)/g, function (m, n) {
+      var r = sent && sent[Number(n) - 1];
+      return "New investment " + (r ? r.no : n);
+    });
+  }
 
   async function saveModify() {
-    var errs = [], removeIds = Object.keys(inv.removed);
-    if (!inv.rows.length && !removeIds.length) { setInvMsg("No changes to save."); return; }
+    var errs = [], removeIds = Object.keys(inv.removed), rows = activeRows();
+    if (!rows.length && !removeIds.length) { setInvMsg("No changes to save."); return; }
 
-    inv.rows.forEach(function (r) {
+    inv.rows.forEach(function (r) { if (rowBlank(r)) showRowErrors(r, {}); });
+    rows.forEach(function (r) {
       var e = rowErrors(r);
       showRowErrors(r, e);
       Object.keys(e).forEach(function (k) { errs.push("New investment " + r.no + ": " + e[k]); });
@@ -518,7 +531,7 @@
       (noteData.investments || []).forEach(function (x) {
         if (!inv.removed[x.Investment_ID]) existing[investmentKey(x["Investor ID"], x.Amount, x["NAV%"], x["Start Date"])] = x.Investment_ID;
       });
-      inv.rows.forEach(function (r) {
+      rows.forEach(function (r) {
         var k = investmentKey(r.picker.getId(), r.amount.value, r.nav.value, r.date.getValue());
         if (existing[k]) errs.push("New investment " + r.no + " matches " + existing[k] + " (same investor, amount, NAV% and start date).");
         else if (seen[k]) errs.push("New investment " + r.no + " matches new investment " + seen[k] + " (same investor, amount, NAV% and start date).");
@@ -538,8 +551,8 @@
 
     var isin = String((noteData.header || {}).ISIN || "").toUpperCase(), seq = noteSeq, tok = token, btn = $("invSave");
     var p = { isin: isin };
-    if (inv.rows.length) {
-      p.addInvestments = inv.rows.map(function (r) {
+    if (rows.length) {
+      p.addInvestments = rows.map(function (r) {
         return { investorId: r.picker.getId(), amount: Number(r.amount.value), nav: Number(r.nav.value), startDate: r.date.getValue() };
       });
     }
@@ -555,7 +568,7 @@
         setInvMsg("Could not confirm the save. Search for " + isin + " again to see whether the change went through before trying again.", "err");
         return;
       }
-      setInvMsg(screenText(errText(r.error)), "err");
+      setInvMsg(screenText(errText(r.error), rows), "err");
       return;
     }
     var done = String(r.data && r.data.message || "Saved.");
