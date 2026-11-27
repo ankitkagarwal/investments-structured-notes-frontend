@@ -401,3 +401,35 @@ tr.removing .strike { color: var(--muted); text-decoration: line-through; }
 #invMsg.ok { color: var(--ok); }
 #invMsg.err { color: var(--err); background: var(--err-bg); }
 .errlist { margin: 6px 0 0; padding-left: 20px; }
+/* Add note (Notes page): step bar, form and step navigation */
+#isinForm { max-width: 600px; }
+input.upper { text-transform: uppercase; letter-spacing: 0.04em; }
+.steps { display: flex; gap: 2px; overflow-x: auto; margin: 16px 0 4px; border-bottom: 1px solid var(--line-soft); }
+button.stepbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: -1px;
+  padding: 8px 12px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+button.stepbtn:hover { color: var(--ink); }
+button.stepbtn[aria-current="step"] { color: var(--ink); border-bottom-color: var(--ink); }
+.stepdot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+button.stepbtn.done .stepdot { background: var(--gold); }
+button.stepbtn.err .stepdot { background: var(--err); }
+.field .cellerr { max-width: none; }
+.field select.invalid { border-color: var(--err); background: var(--err-bg); }
+.fieldhint { display: block; margin: 4px 0 0; }
+.stepnav { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.stepnav-right { display: flex; gap: 12px; flex-wrap: wrap; }
+.stepnav .secondary { margin-top: 0; }
+#addMsg { margin: 16px 0 0; min-height: 1.4em; color: var(--muted); font-size: 0.9375rem; word-break: break-word; }
+#addMsg:not(:empty) { padding: 10px 12px; border-radius: 6px; background: var(--page); }
+#addMsg.err { color: var(--err); background: var(--err-bg); }
