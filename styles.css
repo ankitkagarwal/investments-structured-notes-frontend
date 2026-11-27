@@ -433,3 +433,8 @@ button.stepbtn.err .stepdot { background: var(--err); }
 #addMsg { margin: 16px 0 0; min-height: 1.4em; color: var(--muted); font-size: 0.9375rem; word-break: break-word; }
 #addMsg:not(:empty) { padding: 10px 12px; border-radius: 6px; background: var(--page); }
 #addMsg.err { color: var(--err); background: var(--err-bg); }
+.edittable th.c-co, .edittable td.c-co { min-width: 220px; }
+.edittable th.c-ex, .edittable td.c-ex { min-width: 110px; }
+.edittable th.c-tk, .edittable td.c-tk { min-width: 110px; }
+.edittable th.c-bp, .edittable td.c-bp { min-width: 115px; }
+.rowno { display: inline-block; padding-top: 10px; color: var(--muted); }
