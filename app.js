@@ -633,7 +633,7 @@
   // Barrier % 0 or more. The server (saveAdd / validateHeader_) applies the same rules.
   var ADD_STEPS = [["note", "Note"], ["underlyings", "Underlyings"], ["coupon", "Coupon"],
     ["er", "ER"], ["investments", "Investments"], ["review", "Review"]];
-  var ADD_BUILT = { note: true, underlyings: true }; // steps built so far; the rest show a placeholder
+  var ADD_BUILT = { note: true, underlyings: true, coupon: true }; // steps built so far; the rest show a placeholder
   var CURRENCIES = ["USD", "EUR", "GBP", "CHF", "AED"];
   var add = null; // state while adding, otherwise null
 
@@ -648,7 +648,7 @@
     if (r.ok && r.data && r.data.found && Array.isArray(r.data.dates)) holidays = new Set(r.data.dates);
     else if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
     else holidaysFailed = true;
-    if (add) { refreshNoteErrors(); renderStepBar(); }
+    if (add) { refreshNoteErrors(); if (add.c) refreshCouponErrors(); renderStepBar(); }
   }
   function isoKey(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 
@@ -657,7 +657,7 @@
     var f = add.f;
     return !!(f.isin.value.trim() || f.term.value.trim() || f.rbar.value.trim() || f.currency.value !== "USD" ||
       ["ifd", "issue", "ffd", "red"].some(function (k) { return f[k].getValue(); }) ||
-      (add.u && add.u.rows.some(function (r) { return !underlyingBlank(r); })));
+      (add.u && add.u.rows.some(function (r) { return !underlyingBlank(r); })) || couponDirty());
   }
 
   function addField(grid, label, input, hint) {
@@ -810,11 +810,13 @@
       return list;
     }
     if (key === "underlyings") return underlyingErrorList();
+    if (key === "coupon") return couponErrorList();
     return [];
   }
   function refreshStepErrors(key) {
     if (key === "note") refreshNoteErrors();
     else if (key === "underlyings") refreshUnderlyingErrors();
+    else if (key === "coupon") refreshCouponErrors();
   }
   function stepStatus(key) {
     if (!ADD_BUILT[key]) return "";
@@ -874,6 +876,7 @@
     add.step = i;
     setAddMsg("");
     ADD_STEPS.forEach(function (s, n) { add.panes[s[0]].hidden = n !== i; });
+    if (ADD_STEPS[i][0] === "coupon") refreshCouponErrors();
     renderStepBar();
     var first = ADD_STEPS[i][0] === "underlyings" && add.u.rows.length === 1 && underlyingBlank(add.u.rows[0]);
     if (first) add.u.rows[0].company.focus(); else add.bar.querySelectorAll("button")[i].focus();
@@ -1024,6 +1027,186 @@
     });
   }
 
+  // ---- Add note, sub-task 3 (2026-11-27): Coupon step ----
+  // Rules (server validateHeader_ / validateDropGroup_): In-Memory Y/N; Coupon Barrier % 0 or more;
+  // frequency 1, 2, 3, 6 or 12 months and the Term a multiple of it; Coupon Rate % per period 0 or more,
+  // decimals allowed, saved as a yearly rate = rate x 12 / frequency, rounded to 6 decimals; Roll Day 1 to 31.
+  // Barrier drop (switch): Drop % > 0 and the start period (1 to the number of periods) both required,
+  // Floor % optional, 0 or more and not above the barrier. The start period becomes a date: the roll day in
+  // the month of Initial Fixing Date + n x frequency (clamped to the month's last day), moved forward past
+  // weekends and NYSE holidays; the last period is the Final Fixing Date (as ScheduleGenerator.gs).
+  var FREQS = [[1, "Monthly", "Month"], [2, "Bi-monthly", "2-month period"], [3, "Quarterly", "Quarter"],
+    [6, "Half-yearly", "Half-year"], [12, "Yearly", "Year"]];
+  var NUM_RE = /^\d+(\.\d+)?$/;
+  function freqInfo(v) {
+    for (var i = 0; i < FREQS.length; i++) if (String(FREQS[i][0]) === String(v)) return { months: FREQS[i][0], label: FREQS[i][1], unit: FREQS[i][2] };
+    return null;
+  }
+  function okDate(h) { return h && !h.check() ? h.getDate() : null; }
+  function termMonths() { var t = add.f.term.value.trim(); return /^\d+$/.test(t) && Number(t) > 0 ? Number(t) : 0; }
+  function periodCount() {
+    var f = freqInfo(add.c.freq.value), t = termMonths();
+    return f && t && t % f.months === 0 ? t / f.months : 0;
+  }
+  function rollDay() { var v = add.c.roll.value.trim(); return /^\d+$/.test(v) && +v >= 1 && +v <= 31 ? +v : 0; }
+  // Observation date of period n, or null while something it needs is missing.
+  function periodDate(n) {
+    var max = periodCount(), f = freqInfo(add.c.freq.value);
+    if (!max || !(n >= 1 && n <= max)) return null;
+    if (n === max) return okDate(add.f.ffd);
+    var ifd = okDate(add.f.ifd), roll = rollDay();
+    if (!ifd || !roll || !holidays) return null;
+    var m = ifd.getMonth() + n * f.months, y = ifd.getFullYear() + Math.floor(m / 12);
+    m = ((m % 12) + 12) % 12;
+    var d = new Date(y, m, Math.min(roll, new Date(y, m + 1, 0).getDate()));
+    for (var g = 0; g < 15 && (d.getDay() === 0 || d.getDay() === 6 || holidays.has(isoKey(d))); g++) d.setDate(d.getDate() + 1);
+    return d;
+  }
+  function yearlyRate() {
+    var r = add.c.rate.value.trim(), f = freqInfo(add.c.freq.value);
+    if (!NUM_RE.test(r) || !f) return "";
+    return String(Math.round(Number(r) * (12 / f.months) * 1e6) / 1e6);
+  }
+
+  // Y/N pills (same look as the Investors page consents). onChange(value) after a click.
+  function ynPills(label, value, onChange) {
+    var d = el("div", "field"), id = "yn_" + Math.random().toString(36).slice(2, 9);
+    var l = el("span", "lbl", label); l.id = id; d.appendChild(l);
+    var g = el("div", "pills"); g.setAttribute("role", "radiogroup"); g.setAttribute("aria-labelledby", id);
+    ["Y", "N"].forEach(function (v) {
+      var b = el("button", null, v); b.type = "button"; b.setAttribute("role", "radio"); b.setAttribute("data-v", v);
+      b.addEventListener("click", function () { set(v); if (onChange) onChange(v); });
+      g.appendChild(b);
+    });
+    d.appendChild(g);
+    function set(v) { Array.prototype.forEach.call(g.children, function (b) { b.setAttribute("aria-checked", b.getAttribute("data-v") === v ? "true" : "false"); }); }
+    function get() { var b = g.querySelector('[aria-checked="true"]'); return b ? b.getAttribute("data-v") : ""; }
+    set(value);
+    return { node: d, get: get, set: set };
+  }
+
+  function buildCouponStep() {
+    var s = el("div"), c = { e: {}, touched: {} };
+    add.c = c;
+    var g1 = el("div", "formgrid");
+    c.inMem = ynPills("In-Memory", "Y", function () { renderStepBar(); });
+    g1.appendChild(c.inMem.node);
+    c.barrier = textInput({ inputmode: "decimal", maxlength: "10", autocomplete: "off" });
+    c.e.barrier = addField(g1, "Coupon Barrier %", c.barrier);
+    c.freq = el("select");
+    var o0 = el("option", null, "Select"); o0.value = ""; c.freq.appendChild(o0);
+    FREQS.forEach(function (f) { var o = el("option", null, f[1]); o.value = String(f[0]); c.freq.appendChild(o); });
+    c.e.freq = addField(g1, "Frequency", c.freq);
+    c.rate = textInput({ inputmode: "decimal", maxlength: "12", autocomplete: "off" });
+    c.e.rate = addField(g1, "Coupon Rate % per period", c.rate, " ");
+    c.rateLabel = c.rate.parentNode.querySelector("label");
+    c.rateNote = c.rate.parentNode.querySelector(".fieldhint");
+    c.roll = textInput({ inputmode: "numeric", maxlength: "2", autocomplete: "off" });
+    c.e.roll = addField(g1, "Roll Day", c.roll);
+    s.appendChild(block("Coupon", g1));
+    s.appendChild(el("p", "muted small count", "Enter the coupon rate exactly as the term sheet gives it for one period; it is saved as a yearly rate."));
+
+    c.dropPills = ynPills("Applicable", "N", function () { c.dropBox.hidden = c.dropPills.get() !== "Y"; refreshCouponErrors(); renderStepBar(); });
+    var g0 = el("div", "formgrid"); g0.appendChild(c.dropPills.node);
+    var sec = block("Barrier drop", g0);
+    c.dropBox = el("div", "formgrid dropbox"); c.dropBox.hidden = true;
+    c.drop = textInput({ inputmode: "decimal", maxlength: "10", autocomplete: "off" });
+    c.e.drop = addField(c.dropBox, "Drop %", c.drop);
+    c.start = textInput({ inputmode: "numeric", maxlength: "3", autocomplete: "off" });
+    c.e.start = addField(c.dropBox, "Drop starts at period no.", c.start, " ");
+    c.startLabel = c.start.parentNode.querySelector("label");
+    c.startNote = c.start.parentNode.querySelector(".fieldhint");
+    c.floor = textInput({ inputmode: "decimal", maxlength: "10", autocomplete: "off" });
+    c.e.floor = addField(c.dropBox, "Floor % (optional)", c.floor);
+    sec.appendChild(c.dropBox);
+    s.appendChild(sec);
+    s.appendChild(el("p", "muted small count", "A drop start date on a weekend or NYSE holiday moves to the next business day; the last period is the Final Fixing Date."));
+
+    [["barrier", /[^\d.]/g], ["rate", /[^\d.]/g], ["roll", /\D/g], ["drop", /[^\d.]/g], ["start", /\D/g], ["floor", /[^\d.]/g]].forEach(function (p) {
+      var i = c[p[0]];
+      i.addEventListener("input", function () {
+        var v = i.value.replace(p[1], ""); if (v !== i.value) i.value = v;
+        showCouponErrors({}, p[0]); updateCouponNotes(); renderStepBar();
+      });
+      i.addEventListener("blur", function () { c.touched[p[0]] = true; refreshCouponErrors(); renderStepBar(); });
+    });
+    c.freq.addEventListener("change", function () { c.touched.freq = true; refreshCouponErrors(); renderStepBar(); });
+    updateCouponNotes();
+    return s;
+  }
+
+  // Labels and "saved as" lines follow the frequency, the Note step and the holiday calendar.
+  function updateCouponNotes() {
+    var c = add.c, f = freqInfo(c.freq.value), unit = f ? f.unit : "period";
+    c.rateLabel.textContent = "Coupon Rate % per " + unit.toLowerCase();
+    c.startLabel.textContent = "Drop starts at " + unit.toLowerCase() + " no.";
+    var y = yearlyRate();
+    c.rateNote.textContent = y ? "Saved as " + y + "% a year." : "";
+    var n = c.start.value.trim(), max = periodCount(), d = /^\d+$/.test(n) ? periodDate(+n) : null;
+    c.startNote.textContent = d ? "Drop starts on " + DateField.format(d) + (+n === max ? " (Final Fixing Date)." : ".") :
+      max ? "1 to " + max + " for this term." : "";
+  }
+
+  function couponErrors() {
+    var c = add.c, e = {}, f = freqInfo(c.freq.value), t = termMonths();
+    var b = c.barrier.value.trim();
+    if (!b) e.barrier = "Coupon Barrier % is required.";
+    else if (!NUM_RE.test(b)) e.barrier = "Coupon Barrier % must be a number (0 or more).";
+    if (!f) e.freq = "Frequency is required.";
+    else if (t && t % f.months !== 0) e.freq = "Term (" + t + " months) must be a multiple of the coupon frequency (" + f.months + " months).";
+    var r = c.rate.value.trim();
+    if (!r) e.rate = "Coupon Rate % is required.";
+    else if (!NUM_RE.test(r)) e.rate = "Coupon Rate % must be a number (0 or more).";
+    var rd = c.roll.value.trim();
+    if (!rd) e.roll = "Roll Day is required.";
+    else if (!rollDay()) e.roll = "Roll Day must be a whole number from 1 to 31.";
+    if (c.dropPills.get() === "Y") {
+      var dp = c.drop.value.trim();
+      if (!dp) e.drop = "Drop % is required when the barrier drops.";
+      else if (!NUM_RE.test(dp) || Number(dp) <= 0) e.drop = "Drop % must be a number greater than 0.";
+      var n = c.start.value.trim(), max = periodCount();
+      if (!n) e.start = "The drop start period is required when the barrier drops.";
+      else if (!max) e.start = "Choose the frequency and complete the Term on the Note step first.";
+      else if (!(+n >= 1 && +n <= max)) e.start = "The drop start period must be a whole number from 1 to " + max + ".";
+      else {
+        var d = periodDate(+n), ifd = okDate(add.f.ifd), ffd = okDate(add.f.ffd);
+        if (!d || !ifd || !ffd) e.start = "The drop start date cannot be worked out yet: complete the Initial Fixing Date and Final Fixing Date (Note step) and the Roll Day.";
+        else if (d < ifd || d > ffd) e.start = "The drop start date (" + DateField.format(d) + ") must be between the Initial Fixing Date and the Final Fixing Date.";
+      }
+      var fl = c.floor.value.trim();
+      if (fl) {
+        if (!NUM_RE.test(fl)) e.floor = "Floor % must be a number (0 or more).";
+        else if (NUM_RE.test(b) && Number(fl) > Number(b)) e.floor = "Floor % cannot be above the Coupon Barrier %.";
+      }
+    }
+    return e;
+  }
+  function couponErrorList() {
+    var e = couponErrors(), list = Object.keys(e).map(function (k) { return e[k]; });
+    if (add.c.dropPills.get() === "Y") { var cal = calendarProblem(); if (cal) list.unshift(cal); }
+    return list;
+  }
+  function refreshCouponErrors() {
+    var e = couponErrors(), shown = {};
+    Object.keys(e).forEach(function (k) { if (add.c.touched[k] || add.showAll.coupon) shown[k] = e[k]; });
+    showCouponErrors(shown);
+    updateCouponNotes();
+  }
+  function showCouponErrors(e, only) {
+    var c = add.c;
+    ["barrier", "freq", "rate", "roll", "drop", "start", "floor"].forEach(function (k) {
+      if (only && only !== k) return;
+      var m = e[k] || "";
+      c.e[k].textContent = m; c.e[k].hidden = !m;
+      c[k].classList.toggle("invalid", !!m);
+    });
+  }
+  function couponDirty() {
+    var c = add.c;
+    return !!(c && (c.inMem.get() !== "Y" || c.dropPills.get() !== "N" || c.freq.value ||
+      ["barrier", "rate", "roll", "drop", "start", "floor"].some(function (k) { return c[k].value.trim(); })));
+  }
+
   function closeAddPopups() {
     if (add && add.f) ["ifd", "issue", "ffd", "red"].forEach(function (k) { if (add.f[k] && add.f[k].close) add.f[k].close(); });
     if (add && add.u) add.u.rows.forEach(function (r) { r.pickers.forEach(function (p) { p.close(); }); });
@@ -1059,7 +1242,8 @@
     add.bar = el("div", "steps"); add.bar.setAttribute("aria-label", "Steps");
     host.appendChild(add.bar);
     ADD_STEPS.forEach(function (s) {
-      var p = s[0] === "note" ? buildNoteStep() : s[0] === "underlyings" ? buildUnderlyingsStep() : placeholderPane(s[1]);
+      var p = s[0] === "note" ? buildNoteStep() : s[0] === "underlyings" ? buildUnderlyingsStep() :
+        s[0] === "coupon" ? buildCouponStep() : placeholderPane(s[1]);
       p.hidden = s[0] !== "note";
       add.panes[s[0]] = p;
       host.appendChild(p);
