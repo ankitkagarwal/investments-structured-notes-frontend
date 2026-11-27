@@ -64,13 +64,16 @@
     if (!PAGES[name]) name = "tasks";
     $("pageTitle").textContent = PAGES[name];
     var BODY = {
-      notes: "Look up a note by its ISIN. You can add or remove its investments; other details are read-only for now.",
+      notes: "Type part of an ISIN or a ticker and pick a note, or enter the full ISIN and press Search. You can add or remove its investments; other details are read-only for now.",
       investors: "Type to filter by ID, name or email. Open an investor to edit, or add a new one."
     };
     $("pageBody").textContent = BODY[name] || "Coming soon.";
     $("notesPage").hidden = name !== "notes";
     $("investorsPage").hidden = name !== "investors";
-    if (name === "notes") $("isin").focus();
+    if (name === "notes") {
+      if (!notesLoaded) loadNotes();
+      $("isin").focus();
+    }
     if (name === "investors") {
       $("invQuery").focus();
       if (!investorsLoaded) loadInvestors(); else filterInvestors();
@@ -119,6 +122,32 @@
   }
 
   var noteSeq = 0;
+
+  // ---- Note list for the ISIN search (note.list), loaded once per sign-in, reloaded after a save ----
+  var notesList = [], notesLoaded = false, notesFailed = false, noteListSeq = 0;
+  async function loadNotes() {
+    var seq = ++noteListSeq, tok = token;
+    notesFailed = false;
+    if (isinPicker) isinPicker.refresh();
+    var r = await callApi("note.list", {}, tok);
+    if (seq !== noteListSeq || tok !== token) return; // signed out or superseded meanwhile
+    if (r.ok && r.data && Array.isArray(r.data.notes)) {
+      notesList = r.data.notes; notesLoaded = true;
+    } else if (r.error && r.error.code === "UNAUTHENTICATED") {
+      sessionEnded(); return;
+    } else if (!notesLoaded) {
+      notesFailed = true; // a failed reload keeps the list already loaded
+    }
+    if (isinPicker) isinPicker.refresh();
+  }
+  var isinPicker = window.NotePicker ? NotePicker.attach($("isin"), {
+    source: function () { return notesList; },
+    status: function () { return notesLoaded ? "ok" : notesFailed ? "failed" : "loading"; },
+    onPick: function () {
+      var f = $("isinForm");
+      if (f.requestSubmit) f.requestSubmit(); else f.dispatchEvent(new Event("submit", { cancelable: true }));
+    }
+  }) : null;
   function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -171,7 +200,11 @@
     return wrap;
   }
   function clearNote() { var r = $("noteResult"); while (r.firstChild) r.removeChild(r.firstChild); }
-  function resetNotes() { noteSeq++; closeModifyPopups(); inv = null; noteData = null; clearNote(); $("isin").value = ""; $("isinBtn").disabled = false; }
+  function resetNotes() {
+    noteSeq++; closeModifyPopups(); inv = null; noteData = null; clearNote(); $("isin").value = ""; $("isinBtn").disabled = false;
+    noteListSeq++; notesList = []; notesLoaded = false; notesFailed = false;
+    if (isinPicker) isinPicker.close();
+  }
 
   function renderNote(d) {
     noteData = d; inv = null;
@@ -577,6 +610,7 @@
     }
     closeModifyPopups();
     inv = null;
+    loadNotes(); // investment counts changed; refresh the search list in the background
     var g = await callApi("note.get", { isin: isin }, tok);
     if (seq !== noteSeq || tok !== token) return;
     if (g.ok && g.data) { renderNote(g.data); setMsg(done, "ok"); return; }
@@ -871,10 +905,11 @@
 
   $("isinForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
+    if (isinPicker) isinPicker.close();
     if (notesDirty() && !confirm("Discard your unsaved investment changes?")) return;
     var isin = $("isin").value.trim().toUpperCase();
     $("isin").value = isin;
-    if (!/^[A-Z0-9]{12}$/.test(isin)) { setMsg("Enter a 12-character ISIN (letters and digits).", "err"); return; }
+    if (!/^[A-Z0-9]{12}$/.test(isin)) { setMsg("Pick a note from the list, or enter a 12-character ISIN (letters and digits).", "err"); return; }
     var seq = ++noteSeq, tok = token, btn = $("isinBtn");
     busy(btn, true); setMsg("Searching..."); clearNote();
     var r = await callApi("note.get", { isin: isin }, tok);
