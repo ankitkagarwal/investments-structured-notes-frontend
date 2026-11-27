@@ -59,12 +59,14 @@
   var badgeSeq = 0;
 
   var PAGES = { tasks: "Tasks", notes: "Notes", investors: "Investors", payouts: "Payouts", charges: "Charges" };
+  var NOTES_BODY = "Type part of an ISIN or a ticker and pick a note, or enter the full ISIN and press Search. You can add or remove its investments; other details are read-only for now. Use Add note for a new note.";
+  var ADD_BODY = "Enter the new note step by step. Nothing is saved until you press Save on the Review step.";
 
   function showPage(name) {
     if (!PAGES[name]) name = "tasks";
     $("pageTitle").textContent = PAGES[name];
     var BODY = {
-      notes: "Type part of an ISIN or a ticker and pick a note, or enter the full ISIN and press Search. You can add or remove its investments; other details are read-only for now.",
+      notes: add ? ADD_BODY : NOTES_BODY,
       investors: "Type to filter by ID, name or email. Open an investor to edit, or add a new one."
     };
     $("pageBody").textContent = BODY[name] || "Coming soon.";
@@ -72,7 +74,7 @@
     $("investorsPage").hidden = name !== "investors";
     if (name === "notes") {
       if (!notesLoaded) loadNotes();
-      $("isin").focus();
+      if (!add) $("isin").focus();
     }
     if (name === "investors") {
       $("invQuery").focus();
@@ -204,6 +206,8 @@
     noteSeq++; closeModifyPopups(); inv = null; noteData = null; clearNote(); $("isin").value = ""; $("isinBtn").disabled = false;
     noteListSeq++; notesList = []; notesLoaded = false; notesFailed = false;
     if (isinPicker) isinPicker.close();
+    if (add) leaveAdd();
+    holidaySeq++; holidays = null; holidaysFailed = false;
   }
 
   function renderNote(d) {
@@ -286,7 +290,7 @@
   }
   function activeRows() { return inv ? inv.rows.filter(function (r) { return !rowBlank(r); }) : []; }
   function notesDirty() { return !!inv && (activeRows().length > 0 || Object.keys(inv.removed).length > 0); }
-  window.addEventListener("beforeunload", function (ev) { if (notesDirty()) { ev.preventDefault(); ev.returnValue = ""; } });
+  window.addEventListener("beforeunload", function (ev) { if (notesDirty() || addDirty()) { ev.preventDefault(); ev.returnValue = ""; } });
 
   function closeModifyPopups() {
     if (inv) inv.rows.forEach(function (r) { r.picker.close(); r.date.close(); });
@@ -619,6 +623,316 @@
     setMsg(done + " The note could not be refreshed; search for it again.", "ok");
   }
 
+  // ---- Add note (note.add), built one step at a time. Sub-task 1 (2026-11-27): shell + Note step ----
+  // Rules agreed 2026-11-27: ISIN 12 letters or digits, not already on the note list; Currency USD, EUR,
+  // GBP, CHF or AED (default USD); Initial Fixing <= Issue < Final Fixing <= Redemption Date, all four
+  // business days (no weekend, no NYSE holiday); Term a whole number of months > 0; Redemption
+  // Barrier % 0 or more. The server (saveAdd / validateHeader_) applies the same rules.
+  var ADD_STEPS = [["note", "Note"], ["underlyings", "Underlyings"], ["coupon", "Coupon"],
+    ["er", "ER"], ["investments", "Investments"], ["review", "Review"]];
+  var ADD_BUILT = { note: true }; // steps built so far; the rest show a placeholder
+  var CURRENCIES = ["USD", "EUR", "GBP", "CHF", "AED"];
+  var add = null; // state while adding, otherwise null
+
+  // NYSE holidays (lookup.holidayCalendar), loaded once per sign-in when Add opens.
+  var holidays = null, holidaysFailed = false, holidaySeq = 0;
+  async function loadHolidays() {
+    if (holidays) return;
+    var seq = ++holidaySeq, tok = token;
+    holidaysFailed = false;
+    var r = await callApi("lookup.holidayCalendar", {}, tok);
+    if (seq !== holidaySeq || tok !== token) return;
+    if (r.ok && r.data && r.data.found && Array.isArray(r.data.dates)) holidays = new Set(r.data.dates);
+    else if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
+    else holidaysFailed = true;
+    if (add) { refreshNoteErrors(); renderStepBar(); }
+  }
+  function isoKey(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+
+  function addDirty() {
+    if (!add) return false;
+    var f = add.f;
+    return !!(f.isin.value.trim() || f.term.value.trim() || f.rbar.value.trim() || f.currency.value !== "USD" ||
+      ["ifd", "issue", "ffd", "red"].some(function (k) { return f[k].getValue(); }));
+  }
+
+  function addField(grid, label, input, hint) {
+    var d = el("div", "field");
+    var l = el("label", null, label);
+    input.id = "add_" + Math.random().toString(36).slice(2, 9);
+    l.htmlFor = input.id;
+    d.appendChild(l); d.appendChild(input);
+    if (hint) d.appendChild(el("span", "muted small fieldhint", hint));
+    var e = el("span", "cellerr"); e.hidden = true; d.appendChild(e);
+    grid.appendChild(d);
+    return e;
+  }
+  function textInput(attrs) {
+    var i = el("input");
+    i.type = "text";
+    Object.keys(attrs || {}).forEach(function (k) { i.setAttribute(k, attrs[k]); });
+    return i;
+  }
+
+  function buildNoteStep() {
+    var s = el("div"), f = {}, e = {};
+    var g1 = el("div", "formgrid");
+    f.isin = textInput({ maxlength: "12", autocomplete: "off", autocapitalize: "characters", spellcheck: "false", placeholder: "12 letters or digits" });
+    f.isin.classList.add("upper");
+    e.isin = addField(g1, "ISIN", f.isin);
+    f.currency = el("select");
+    CURRENCIES.forEach(function (c) { var o = el("option", null, c); o.value = c; f.currency.appendChild(o); });
+    f.currency.value = "USD";
+    e.currency = addField(g1, "Currency", f.currency);
+    var ifd = textInput(), issue = textInput();
+    e.ifd = addField(g1, "Initial Fixing Date", ifd);
+    e.issue = addField(g1, "Issue Date", issue);
+    f.term = textInput({ inputmode: "numeric", maxlength: "3", autocomplete: "off" });
+    e.term = addField(g1, "Term (Months)", f.term);
+    s.appendChild(block("Note details", g1));
+
+    var g2 = el("div", "formgrid");
+    var ffd = textInput(), red = textInput();
+    e.ffd = addField(g2, "Final Fixing Date", ffd);
+    e.red = addField(g2, "Redemption Date", red);
+    f.rbar = textInput({ inputmode: "decimal", maxlength: "10", autocomplete: "off" });
+    e.rbar = addField(g2, "Redemption Barrier %", f.rbar);
+    s.appendChild(block("Redemption", g2));
+    s.appendChild(el("p", "muted small count", "All four dates must be business days (no weekend or NYSE holiday), in this order: " +
+      "Initial Fixing Date, Issue Date, Final Fixing Date, Redemption Date. The Issue Date can equal the Initial Fixing Date, " +
+      "and the Redemption Date can equal the Final Fixing Date."));
+
+    // Date fields are attached once the inputs are in the page (DateField wraps each input).
+    add.pendingDates = [[ifd, "ifd", "Initial Fixing Date"], [issue, "issue", "Issue Date"],
+      [ffd, "ffd", "Final Fixing Date"], [red, "red", "Redemption Date"]];
+    add.f = f; add.e = e;
+
+    f.isin.addEventListener("input", function () {
+      var c = f.isin.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (c !== f.isin.value) f.isin.value = c;
+      showNoteErrors({}, "isin");
+    });
+    f.term.addEventListener("input", function () {
+      var c = f.term.value.replace(/\D/g, "");
+      if (c !== f.term.value) f.term.value = c;
+      showNoteErrors({}, "term");
+    });
+    f.rbar.addEventListener("input", function () {
+      var c = f.rbar.value.replace(/[^\d.]/g, "");
+      if (c !== f.rbar.value) f.rbar.value = c;
+      showNoteErrors({}, "rbar");
+    });
+    ["isin", "term", "rbar"].forEach(function (k) {
+      f[k].addEventListener("blur", function () { touch(k); });
+    });
+    f.currency.addEventListener("change", function () { renderStepBar(); });
+    return s;
+  }
+  function attachNoteDates() {
+    add.pendingDates.forEach(function (p) {
+      var h = DateField.attach(p[0], { label: p[2], required: true });
+      add.f[p[1]] = h;
+      p[0].addEventListener("datechange", function () {
+        add.touched[p[1]] = true;
+        // A date change can fix or break the order of the others, so recheck every touched date.
+        refreshNoteErrors();
+        renderStepBar();
+      });
+    });
+    add.pendingDates = null;
+  }
+  function touch(k) { add.touched[k] = true; refreshNoteErrors(); renderStepBar(); }
+
+  function dateRule(h, label, e, key) {
+    var m = h.check();
+    if (m) { e[key] = m; return null; }
+    var d = h.getDate();
+    if (d.getDay() === 0 || d.getDay() === 6) { e[key] = label + " must be a business day; weekends are not allowed."; return d; }
+    if (holidays && holidays.has(isoKey(d))) e[key] = label + " must be a business day; " + isoKey(d) + " is an NYSE holiday.";
+    return d;
+  }
+  function noteErrors() {
+    var f = add.f, e = {};
+    var isin = f.isin.value.trim().toUpperCase();
+    if (!isin) e.isin = "ISIN is required.";
+    else if (!/^[A-Z0-9]{12}$/.test(isin)) e.isin = "ISIN must be 12 letters or digits.";
+    else if (notesList.some(function (n) { return String(n.isin).toUpperCase() === isin; })) {
+      e.isin = "ISIN " + isin + " already exists. Find it with the search to view or modify it.";
+    }
+    var ifd = dateRule(f.ifd, "Initial Fixing Date", e, "ifd");
+    var issue = dateRule(f.issue, "Issue Date", e, "issue");
+    var ffd = dateRule(f.ffd, "Final Fixing Date", e, "ffd");
+    var red = dateRule(f.red, "Redemption Date", e, "red");
+    if (ifd && issue && !e.issue && issue < ifd) e.issue = "Issue Date cannot be before the Initial Fixing Date.";
+    if (issue && ffd && !e.ffd && ffd <= issue) e.ffd = "Final Fixing Date must be after the Issue Date.";
+    if (ffd && red && !e.red && red < ffd) e.red = "Redemption Date cannot be before the Final Fixing Date.";
+    var t = f.term.value.trim();
+    if (!t) e.term = "Term (Months) is required.";
+    else if (!/^\d+$/.test(t) || Number(t) <= 0) e.term = "Term (Months) must be a whole number greater than 0.";
+    var b = f.rbar.value.trim();
+    if (!b) e.rbar = "Redemption Barrier % is required.";
+    else if (!/^\d+(\.\d+)?$/.test(b)) e.rbar = "Redemption Barrier % must be a number (0 or more).";
+    return e;
+  }
+  // The calendar check is for the whole step, not one field.
+  function calendarProblem() {
+    if (holidaysFailed) return "NYSE_Holidays could not be loaded, so business days cannot be checked. Reload the page to try again.";
+    if (!holidays) return "The holiday calendar is still loading.";
+    return "";
+  }
+  // Shows errors for touched fields only (all fields once Next or a step change has been tried).
+  function refreshNoteErrors() {
+    var e = noteErrors(), shown = {};
+    Object.keys(e).forEach(function (k) { if (add.touched[k] || add.showAll.note) shown[k] = e[k]; });
+    showNoteErrors(shown);
+  }
+  function showNoteErrors(e, only) {
+    var f = add.f;
+    ["isin", "currency", "ifd", "issue", "term", "ffd", "red", "rbar"].forEach(function (k) {
+      if (only && only !== k) return;
+      var m = e[k] || "", span = add.e[k];
+      span.textContent = m; span.hidden = !m;
+      if (f[k].setError) f[k].setError(m);
+      else f[k].classList.toggle("invalid", !!m);
+    });
+  }
+
+  function stepStatus(key) {
+    if (!ADD_BUILT[key]) return "";
+    if (key === "note") {
+      var bad = Object.keys(noteErrors()).length > 0 || !!calendarProblem();
+      if (!bad) return "done";
+      return add.showAll.note ? "err" : "";
+    }
+    return "";
+  }
+  function renderStepBar() {
+    if (!add) return;
+    var bar = add.bar;
+    clearEl(bar);
+    ADD_STEPS.forEach(function (s, i) {
+      var st = stepStatus(s[0]);
+      var b = el("button", "stepbtn" + (st ? " " + st : ""));
+      b.type = "button";
+      b.appendChild(el("span", "stepdot"));
+      b.appendChild(el("span", null, (i + 1) + ". " + s[1]));
+      if (i === add.step) b.setAttribute("aria-current", "step");
+      b.setAttribute("aria-label", s[1] + (st === "done" ? ", complete" : st === "err" ? ", needs attention" : ""));
+      b.addEventListener("click", function () { goStep(i, false); });
+      bar.appendChild(b);
+    });
+    var last = add.step === ADD_STEPS.length - 1;
+    add.prev.disabled = add.step === 0;
+    add.next.hidden = last;
+  }
+
+  function setAddMsg(text, cls, list) {
+    var m = add.msg;
+    clearEl(m);
+    m.className = cls || "";
+    if (text) m.appendChild(el("span", null, text));
+    if (list && list.length) {
+      var ul = el("ul", "errlist");
+      list.forEach(function (t) { ul.appendChild(el("li", null, t)); });
+      m.appendChild(ul);
+    }
+  }
+
+  // Next checks the current step; picking a step in the bar never blocks, but marks the step left.
+  function goStep(i, checked) {
+    var key = ADD_STEPS[add.step][0];
+    if (ADD_BUILT[key]) {
+      add.showAll[key] = true;
+      if (key === "note") refreshNoteErrors();
+      if (checked) {
+        var errs = key === "note" ? Object.keys(noteErrors()).map(function (k) { return noteErrors()[k]; }) : [];
+        var cal = key === "note" ? calendarProblem() : "";
+        if (cal) errs.unshift(cal);
+        if (errs.length) { setAddMsg("Please correct the following before going on:", "err", errs); renderStepBar(); return; }
+      }
+    }
+    closeAddPopups();
+    add.step = i;
+    setAddMsg("");
+    ADD_STEPS.forEach(function (s, n) { add.panes[s[0]].hidden = n !== i; });
+    renderStepBar();
+    add.bar.querySelectorAll("button")[i].focus();
+  }
+
+  function closeAddPopups() {
+    if (add && add.f) ["ifd", "issue", "ffd", "red"].forEach(function (k) { if (add.f[k] && add.f[k].close) add.f[k].close(); });
+  }
+
+  function placeholderPane(title) {
+    var p = el("div");
+    p.appendChild(el("p", "muted", title + " is built in a later step of Notes Add."));
+    return p;
+  }
+
+  function openAdd() {
+    if (!window.DateField) {
+      setMsg("The date field did not load. Hard refresh (Ctrl+Shift+R), and check that datefield.js is on the site.", "err");
+      return;
+    }
+    if (notesDirty() && !confirm("Discard your unsaved investment changes?")) return;
+    noteSeq++; closeModifyPopups(); inv = null; noteData = null; clearNote();
+    if (isinPicker) isinPicker.close();
+    $("isin").value = "";
+    setMsg("");
+    if (!notesLoaded) loadNotes();   // for the duplicate ISIN check
+    loadHolidays();
+
+    var host = $("noteAdd");
+    clearEl(host);
+    add = { step: 0, touched: {}, showAll: {}, panes: {} };
+    var back = el("button", "link back", "← Back to search");
+    back.type = "button";
+    back.addEventListener("click", cancelAdd);
+    host.appendChild(back);
+    var head = el("div", "notehead"); head.appendChild(el("h2", null, "New note")); host.appendChild(head);
+    add.bar = el("div", "steps"); add.bar.setAttribute("aria-label", "Steps");
+    host.appendChild(add.bar);
+    ADD_STEPS.forEach(function (s) {
+      var p = s[0] === "note" ? buildNoteStep() : placeholderPane(s[1]);
+      p.hidden = s[0] !== "note";
+      add.panes[s[0]] = p;
+      host.appendChild(p);
+    });
+    add.msg = el("div"); add.msg.id = "addMsg"; add.msg.setAttribute("role", "status");
+    host.appendChild(add.msg);
+    var nav = el("div", "stepnav");
+    add.prev = el("button", "secondary auto", "‹ Previous"); add.prev.type = "button";
+    add.prev.addEventListener("click", function () { goStep(add.step - 1, false); });
+    var right = el("div", "stepnav-right");
+    var cancel = el("button", "secondary auto", "Cancel"); cancel.type = "button";
+    cancel.addEventListener("click", cancelAdd);
+    add.next = el("button", "primary inline", "Next ›"); add.next.type = "button";
+    add.next.addEventListener("click", function () { goStep(add.step + 1, true); });
+    right.appendChild(cancel); right.appendChild(add.next);
+    nav.appendChild(add.prev); nav.appendChild(right);
+    host.appendChild(nav);
+
+    $("isinForm").hidden = true; $("noteResult").hidden = true; host.hidden = false;
+    $("pageBody").textContent = ADD_BODY;
+    attachNoteDates();
+    renderStepBar();
+    add.f.isin.focus();
+  }
+
+  function leaveAdd() {
+    closeAddPopups();
+    add = null;
+    var host = $("noteAdd");
+    clearEl(host); host.hidden = true;
+    $("isinForm").hidden = false; $("noteResult").hidden = false;
+    $("pageBody").textContent = NOTES_BODY;
+  }
+  function cancelAdd() {
+    if (addDirty() && !confirm("Discard the new note you started?")) return;
+    leaveAdd();
+    $("isin").focus();
+  }
+
   var investorSeq = 0, investorsLoaded = false, allInvestors = [];
   function clearInvestors() { var r = $("investorResult"); while (r.firstChild) r.removeChild(r.firstChild); $("invCount").textContent = ""; }
   function resetInvestors() {
@@ -903,6 +1217,8 @@
   $("invBtn").addEventListener("click", function () { loadInvestors(); });
   $("invAddBtn").addEventListener("click", openAddInvestor);
 
+  $("noteAddBtn").addEventListener("click", openAdd);
+
   $("isinForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
     if (isinPicker) isinPicker.close();
@@ -1024,6 +1340,7 @@
 
   $("logoutBtn").addEventListener("click", async function () {
     if (notesDirty() && !confirm("Discard your unsaved investment changes and sign out?")) return;
+    if (addDirty() && !confirm("Discard the new note you started and sign out?")) return;
     var btn = $("logoutBtn");
     busy(btn, true);
     if (token) await callApi("auth.logout", {}, token);
