@@ -41,7 +41,7 @@
   function position() {
     if (!cur) return;
     var r = cur.input.getBoundingClientRect();
-    var w = Math.min(Math.max(r.width, 300), window.innerWidth - 16);
+    var w = Math.min(r.width, window.innerWidth - 16); // exactly as wide as the field, like the country list
     pop.style.width = w + "px";
     pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
     pop.style.top = r.bottom + 4 + "px";
