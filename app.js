@@ -127,6 +127,7 @@
 
   // ---- Note list for the ISIN search (note.list), loaded once per sign-in, reloaded after a save ----
   var notesList = [], notesLoaded = false, notesFailed = false, noteListSeq = 0;
+  var underlyingList = []; // distinct {companyName, stockExchange, ticker} across notes, from note.list
   async function loadNotes() {
     var seq = ++noteListSeq, tok = token;
     notesFailed = false;
@@ -135,12 +136,14 @@
     if (seq !== noteListSeq || tok !== token) return; // signed out or superseded meanwhile
     if (r.ok && r.data && Array.isArray(r.data.notes)) {
       notesList = r.data.notes; notesLoaded = true;
+      underlyingList = Array.isArray(r.data.underlyings) ? r.data.underlyings : [];
     } else if (r.error && r.error.code === "UNAUTHENTICATED") {
       sessionEnded(); return;
     } else if (!notesLoaded) {
       notesFailed = true; // a failed reload keeps the list already loaded
     }
     if (isinPicker) isinPicker.refresh();
+    if (add && add.u) add.u.rows.forEach(function (r) { r.pickers.forEach(function (p) { p.refresh(); }); });
   }
   var isinPicker = window.NotePicker ? NotePicker.attach($("isin"), {
     source: function () { return notesList; },
@@ -204,7 +207,7 @@
   function clearNote() { var r = $("noteResult"); while (r.firstChild) r.removeChild(r.firstChild); }
   function resetNotes() {
     noteSeq++; closeModifyPopups(); inv = null; noteData = null; clearNote(); $("isin").value = ""; $("isinBtn").disabled = false;
-    noteListSeq++; notesList = []; notesLoaded = false; notesFailed = false;
+    noteListSeq++; notesList = []; underlyingList = []; notesLoaded = false; notesFailed = false;
     if (isinPicker) isinPicker.close();
     if (add) leaveAdd();
     holidaySeq++; holidays = null; holidaysFailed = false;
@@ -630,7 +633,7 @@
   // Barrier % 0 or more. The server (saveAdd / validateHeader_) applies the same rules.
   var ADD_STEPS = [["note", "Note"], ["underlyings", "Underlyings"], ["coupon", "Coupon"],
     ["er", "ER"], ["investments", "Investments"], ["review", "Review"]];
-  var ADD_BUILT = { note: true }; // steps built so far; the rest show a placeholder
+  var ADD_BUILT = { note: true, underlyings: true }; // steps built so far; the rest show a placeholder
   var CURRENCIES = ["USD", "EUR", "GBP", "CHF", "AED"];
   var add = null; // state while adding, otherwise null
 
@@ -653,7 +656,8 @@
     if (!add) return false;
     var f = add.f;
     return !!(f.isin.value.trim() || f.term.value.trim() || f.rbar.value.trim() || f.currency.value !== "USD" ||
-      ["ifd", "issue", "ffd", "red"].some(function (k) { return f[k].getValue(); }));
+      ["ifd", "issue", "ffd", "red"].some(function (k) { return f[k].getValue(); }) ||
+      (add.u && add.u.rows.some(function (r) { return !underlyingBlank(r); })));
   }
 
   function addField(grid, label, input, hint) {
@@ -797,29 +801,46 @@
     });
   }
 
+  // Every message that stops Next on a step (the same list decides the step's dot).
+  function stepErrorList(key) {
+    if (key === "note") {
+      var e = noteErrors(), list = Object.keys(e).map(function (k) { return e[k]; });
+      var cal = calendarProblem();
+      if (cal) list.unshift(cal);
+      return list;
+    }
+    if (key === "underlyings") return underlyingErrorList();
+    return [];
+  }
+  function refreshStepErrors(key) {
+    if (key === "note") refreshNoteErrors();
+    else if (key === "underlyings") refreshUnderlyingErrors();
+  }
   function stepStatus(key) {
     if (!ADD_BUILT[key]) return "";
-    if (key === "note") {
-      var bad = Object.keys(noteErrors()).length > 0 || !!calendarProblem();
-      if (!bad) return "done";
-      return add.showAll.note ? "err" : "";
-    }
-    return "";
+    if (!stepErrorList(key).length) return "done";
+    return add.showAll[key] ? "err" : "";
   }
+  // The buttons are built once and only updated here: rebuilding them on a field's blur would
+  // swallow the click that caused the blur.
   function renderStepBar() {
     if (!add) return;
     var bar = add.bar;
-    clearEl(bar);
+    if (!bar.children.length) {
+      ADD_STEPS.forEach(function (s, i) {
+        var b = el("button", "stepbtn");
+        b.type = "button";
+        b.appendChild(el("span", "stepdot"));
+        b.appendChild(el("span", null, (i + 1) + ". " + s[1]));
+        b.addEventListener("click", function () { goStep(i, false); });
+        bar.appendChild(b);
+      });
+    }
     ADD_STEPS.forEach(function (s, i) {
-      var st = stepStatus(s[0]);
-      var b = el("button", "stepbtn" + (st ? " " + st : ""));
-      b.type = "button";
-      b.appendChild(el("span", "stepdot"));
-      b.appendChild(el("span", null, (i + 1) + ". " + s[1]));
-      if (i === add.step) b.setAttribute("aria-current", "step");
+      var st = stepStatus(s[0]), b = bar.children[i];
+      b.className = "stepbtn" + (st ? " " + st : "");
+      if (i === add.step) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current");
       b.setAttribute("aria-label", s[1] + (st === "done" ? ", complete" : st === "err" ? ", needs attention" : ""));
-      b.addEventListener("click", function () { goStep(i, false); });
-      bar.appendChild(b);
     });
     var last = add.step === ADD_STEPS.length - 1;
     add.prev.disabled = add.step === 0;
@@ -843,11 +864,9 @@
     var key = ADD_STEPS[add.step][0];
     if (ADD_BUILT[key]) {
       add.showAll[key] = true;
-      if (key === "note") refreshNoteErrors();
+      refreshStepErrors(key);
       if (checked) {
-        var errs = key === "note" ? Object.keys(noteErrors()).map(function (k) { return noteErrors()[k]; }) : [];
-        var cal = key === "note" ? calendarProblem() : "";
-        if (cal) errs.unshift(cal);
+        var errs = stepErrorList(key);
         if (errs.length) { setAddMsg("Please correct the following before going on:", "err", errs); renderStepBar(); return; }
       }
     }
@@ -856,11 +875,158 @@
     setAddMsg("");
     ADD_STEPS.forEach(function (s, n) { add.panes[s[0]].hidden = n !== i; });
     renderStepBar();
-    add.bar.querySelectorAll("button")[i].focus();
+    var first = ADD_STEPS[i][0] === "underlyings" && add.u.rows.length === 1 && underlyingBlank(add.u.rows[0]);
+    if (first) add.u.rows[0].company.focus(); else add.bar.querySelectorAll("button")[i].focus();
+  }
+
+  // ---- Add note, sub-task 2 (2026-11-27): Underlyings step ----
+  // Rules (server validateUnderlying_ + saveAdd): Company letters, digits, spaces and & . ( ) ' - ;
+  // Exchange and Ticker letters and digits (max 10, as legacy); Buy Price > 0 with at most 2 decimals;
+  // 1 to 20 underlyings; a ticker only once per note (any case). A row left completely blank is ignored.
+  var MAX_UNDERLYINGS = 20;
+  var COMPANY_RE = /^[A-Za-z0-9 &.()'-]+$/, ALNUM_RE = /^[A-Za-z0-9]+$/, PRICE_RE = /^\d+(\.\d{1,2})?$/;
+
+  function buildUnderlyingsStep() {
+    var s = el("div");
+    s.appendChild(el("p", "muted small count",
+      "Type 2 or more letters of a company or ticker to pick an underlying used on another note; the buy price is always entered here. " +
+      "Up to " + MAX_UNDERLYINGS + " underlyings, each ticker once."));
+    var wrap = el("div", "tablewrap"), t = el("table", "edittable"), hr = el("tr"), tb = el("tbody");
+    t.setAttribute("aria-label", "Underlyings");
+    [["#", ""], ["Company", "c-co"], ["Exchange", "c-ex"], ["Ticker", "c-tk"], ["Buy price", "c-bp"], ["", ""]]
+      .forEach(function (c) { var th = el("th", c[1] || null, c[0]); th.scope = "col"; hr.appendChild(th); });
+    var thead = el("thead"); thead.appendChild(hr); t.appendChild(thead);
+    t.appendChild(tb); wrap.appendChild(t); s.appendChild(wrap);
+    add.u = { rows: [], body: tb };
+    add.u.addBtn = el("button", "secondary auto small addrow", "+ Add underlying");
+    add.u.addBtn.type = "button";
+    add.u.addBtn.addEventListener("click", function () { addUnderlyingRow(true); });
+    s.appendChild(add.u.addBtn);
+    return s;
+  }
+
+  function addUnderlyingRow(focus) {
+    var r = { touched: {} }, tr = el("tr");
+    r.tr = tr;
+    r.noCell = el("td"); r.noCell.appendChild(el("span", "rowno")); tr.appendChild(r.noCell);
+    function cell(cls, input) {
+      var td = el("td", cls), e = el("span", "cellerr"); e.hidden = true;
+      td.appendChild(input); td.appendChild(e); tr.appendChild(td);
+      return e;
+    }
+    r.company = cellInput("", { maxlength: "100", autocomplete: "off", "aria-label": "Company" });
+    r.eCompany = cell("c-co", r.company);
+    r.exchange = cellInput("", { maxlength: "10", autocomplete: "off", "aria-label": "Stock exchange" });
+    r.eExchange = cell("c-ex", r.exchange);
+    r.ticker = cellInput("", { maxlength: "10", autocomplete: "off", "aria-label": "Ticker" });
+    r.eTicker = cell("c-tk", r.ticker);
+    r.price = cellInput("num", { inputmode: "decimal", maxlength: "10", autocomplete: "off", "aria-label": "Buy price" });
+    r.ePrice = cell("c-bp", r.price);
+    var tdX = el("td"); r.del = el("button", "link", "Delete"); r.del.type = "button";
+    r.del.addEventListener("click", function () { deleteUnderlyingRow(r); });
+    tdX.appendChild(r.del); tr.appendChild(tdX);
+    add.u.body.appendChild(tr);
+
+    function picked(m) {
+      r.company.value = m.companyName; r.exchange.value = m.stockExchange; r.ticker.value = m.ticker;
+      ["company", "exchange", "ticker"].forEach(function (k) { r.touched[k] = true; });
+      refreshUnderlyingErrors(); renderStepBar();
+      r.price.focus();
+    }
+    r.pickers = window.UnderlyingPicker ? [r.company, r.ticker].map(function (i) {
+      return UnderlyingPicker.attach(i, {
+        source: function () { return underlyingList; },
+        status: function () { return notesLoaded ? "ok" : notesFailed ? "failed" : "loading"; },
+        onPick: picked
+      });
+    }) : [];
+
+    [["company", null], ["exchange", /[^A-Za-z0-9]/g], ["ticker", /[^A-Za-z0-9]/g], ["price", /[^\d.]/g]].forEach(function (p) {
+      var i = r[p[0]];
+      i.addEventListener("input", function () {
+        if (p[1]) { var c = i.value.replace(p[1], ""); if (c !== i.value) i.value = c; }
+        showUnderlyingRowErrors(r, {}, p[0]); renderStepBar();
+      });
+      i.addEventListener("blur", function () { r.touched[p[0]] = true; refreshUnderlyingErrors(); renderStepBar(); });
+    });
+
+    add.u.rows.push(r);
+    renumberUnderlyings();
+    if (focus) r.company.focus();
+  }
+
+  function deleteUnderlyingRow(r) {
+    if (add.u.rows.length <= 1) return;
+    r.pickers.forEach(function (p) { p.close(); });
+    add.u.rows.splice(add.u.rows.indexOf(r), 1);
+    r.tr.parentNode.removeChild(r.tr);
+    renumberUnderlyings(); refreshUnderlyingErrors(); renderStepBar();
+  }
+  function renumberUnderlyings() {
+    add.u.rows.forEach(function (r, i) {
+      r.no = i + 1;
+      r.noCell.firstChild.textContent = String(i + 1);
+      r.del.disabled = add.u.rows.length <= 1;
+      r.del.setAttribute("aria-label", "Delete underlying " + (i + 1));
+    });
+    add.u.addBtn.disabled = add.u.rows.length >= MAX_UNDERLYINGS;
+    add.u.addBtn.title = add.u.addBtn.disabled ? "At most " + MAX_UNDERLYINGS + " underlyings" : "";
+  }
+
+  function underlyingBlank(r) {
+    return !r.company.value.trim() && !r.exchange.value.trim() && !r.ticker.value.trim() && !r.price.value.trim();
+  }
+  // Returns { perRow: [{field: msg}], general: [msg] } for the rows on screen.
+  function underlyingErrors() {
+    var perRow = [], general = [], seen = {}, filled = 0;
+    add.u.rows.forEach(function (r) {
+      var e = {};
+      perRow.push(e);
+      if (underlyingBlank(r)) return;
+      filled++;
+      var co = r.company.value.trim(), ex = r.exchange.value.trim(), tk = r.ticker.value.trim(), bp = r.price.value.trim();
+      if (!co) e.company = "Company is required.";
+      else if (!COMPANY_RE.test(co)) e.company = "Company can contain letters, digits, spaces and & . ( ) ' - only.";
+      if (!ex) e.exchange = "Exchange is required.";
+      else if (!ALNUM_RE.test(ex)) e.exchange = "Exchange can contain letters and digits only.";
+      if (!tk) e.ticker = "Ticker is required.";
+      else if (!ALNUM_RE.test(tk)) e.ticker = "Ticker can contain letters and digits only.";
+      else if (seen[tk.toUpperCase()]) e.ticker = "Ticker " + tk.toUpperCase() + " is already on underlying " + seen[tk.toUpperCase()] + ".";
+      else seen[tk.toUpperCase()] = r.no;
+      if (!bp) e.price = "Buy price is required.";
+      else if (!PRICE_RE.test(bp)) e.price = "Buy price must be a number with at most 2 decimals.";
+      else if (Number(bp) <= 0) e.price = "Buy price must be greater than 0.";
+    });
+    if (!filled) general.push("At least one underlying is required.");
+    return { perRow: perRow, general: general };
+  }
+  function underlyingErrorList() {
+    var u = underlyingErrors(), list = u.general.slice();
+    u.perRow.forEach(function (e, i) {
+      Object.keys(e).forEach(function (k) { list.push("Underlying " + (i + 1) + ": " + e[k]); });
+    });
+    return list;
+  }
+  function refreshUnderlyingErrors() {
+    var u = underlyingErrors();
+    add.u.rows.forEach(function (r, i) {
+      var e = u.perRow[i], shown = {};
+      Object.keys(e).forEach(function (k) { if (r.touched[k] || add.showAll.underlyings) shown[k] = e[k]; });
+      showUnderlyingRowErrors(r, shown);
+    });
+  }
+  function showUnderlyingRowErrors(r, e, only) {
+    [["company", r.eCompany], ["exchange", r.eExchange], ["ticker", r.eTicker], ["price", r.ePrice]].forEach(function (f) {
+      if (only && only !== f[0]) return;
+      var m = e[f[0]] || "";
+      f[1].textContent = m; f[1].hidden = !m;
+      r[f[0]].classList.toggle("invalid", !!m);
+    });
   }
 
   function closeAddPopups() {
     if (add && add.f) ["ifd", "issue", "ffd", "red"].forEach(function (k) { if (add.f[k] && add.f[k].close) add.f[k].close(); });
+    if (add && add.u) add.u.rows.forEach(function (r) { r.pickers.forEach(function (p) { p.close(); }); });
   }
 
   function placeholderPane(title) {
@@ -879,7 +1045,7 @@
     if (isinPicker) isinPicker.close();
     $("isin").value = "";
     setMsg("");
-    if (!notesLoaded) loadNotes();   // for the duplicate ISIN check
+    if (!notesLoaded) loadNotes();   // for the duplicate ISIN check and the underlying search
     loadHolidays();
 
     var host = $("noteAdd");
@@ -893,7 +1059,7 @@
     add.bar = el("div", "steps"); add.bar.setAttribute("aria-label", "Steps");
     host.appendChild(add.bar);
     ADD_STEPS.forEach(function (s) {
-      var p = s[0] === "note" ? buildNoteStep() : placeholderPane(s[1]);
+      var p = s[0] === "note" ? buildNoteStep() : s[0] === "underlyings" ? buildUnderlyingsStep() : placeholderPane(s[1]);
       p.hidden = s[0] !== "note";
       add.panes[s[0]] = p;
       host.appendChild(p);
@@ -915,6 +1081,7 @@
     $("isinForm").hidden = true; $("noteResult").hidden = true; host.hidden = false;
     $("pageBody").textContent = ADD_BODY;
     attachNoteDates();
+    addUnderlyingRow(false);
     renderStepBar();
     add.f.isin.focus();
   }
