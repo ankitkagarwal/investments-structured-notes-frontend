@@ -438,3 +438,5 @@ button.stepbtn.err .stepdot { background: var(--err); }
 .edittable th.c-tk, .edittable td.c-tk { min-width: 110px; }
 .edittable th.c-bp, .edittable td.c-bp { min-width: 115px; }
 .rowno { display: inline-block; padding-top: 10px; color: var(--muted); }
+.dropbox { margin-top: 14px; padding: 14px; background: var(--page); border: 1px dashed var(--line); border-radius: 6px; }
+.fieldhint:empty { display: none; }
