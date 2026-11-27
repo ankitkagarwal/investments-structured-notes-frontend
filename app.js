@@ -633,7 +633,7 @@
   // Barrier % 0 or more. The server (saveAdd / validateHeader_) applies the same rules.
   var ADD_STEPS = [["note", "Note"], ["underlyings", "Underlyings"], ["coupon", "Coupon"],
     ["er", "ER"], ["investments", "Investments"], ["review", "Review"]];
-  var ADD_BUILT = { note: true, underlyings: true, coupon: true }; // steps built so far; the rest show a placeholder
+  var ADD_BUILT = { note: true, underlyings: true, coupon: true, er: true }; // steps built so far; the rest show a placeholder
   var CURRENCIES = ["USD", "EUR", "GBP", "CHF", "AED"];
   var add = null; // state while adding, otherwise null
 
@@ -648,7 +648,7 @@
     if (r.ok && r.data && r.data.found && Array.isArray(r.data.dates)) holidays = new Set(r.data.dates);
     else if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
     else holidaysFailed = true;
-    if (add) { refreshNoteErrors(); if (add.c) refreshCouponErrors(); renderStepBar(); }
+    if (add) { refreshNoteErrors(); if (add.c) refreshCouponErrors(); if (add.r) refreshErErrors(); renderStepBar(); }
   }
   function isoKey(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 
@@ -657,7 +657,7 @@
     var f = add.f;
     return !!(f.isin.value.trim() || f.term.value.trim() || f.rbar.value.trim() || f.currency.value !== "USD" ||
       ["ifd", "issue", "ffd", "red"].some(function (k) { return f[k].getValue(); }) ||
-      (add.u && add.u.rows.some(function (r) { return !underlyingBlank(r); })) || couponDirty());
+      (add.u && add.u.rows.some(function (r) { return !underlyingBlank(r); })) || couponDirty() || erDirty());
   }
 
   function addField(grid, label, input, hint) {
@@ -811,12 +811,14 @@
     }
     if (key === "underlyings") return underlyingErrorList();
     if (key === "coupon") return couponErrorList();
+    if (key === "er") return erErrorList();
     return [];
   }
   function refreshStepErrors(key) {
     if (key === "note") refreshNoteErrors();
     else if (key === "underlyings") refreshUnderlyingErrors();
     else if (key === "coupon") refreshCouponErrors();
+    else if (key === "er") refreshErErrors();
   }
   function stepStatus(key) {
     if (!ADD_BUILT[key]) return "";
@@ -877,6 +879,7 @@
     setAddMsg("");
     ADD_STEPS.forEach(function (s, n) { add.panes[s[0]].hidden = n !== i; });
     if (ADD_STEPS[i][0] === "coupon") refreshCouponErrors();
+    if (ADD_STEPS[i][0] === "er") refreshErErrors();
     renderStepBar();
     var first = ADD_STEPS[i][0] === "underlyings" && add.u.rows.length === 1 && underlyingBlank(add.u.rows[0]);
     if (first) add.u.rows[0].company.focus(); else add.bar.querySelectorAll("button")[i].focus();
@@ -1207,6 +1210,174 @@
       ["barrier", "rate", "roll", "drop", "start", "floor"].some(function (k) { return c[k].value.trim(); })));
   }
 
+  // ---- Add note, sub-task 4 (2026-11-27): ER step ----
+  // Rules (server validateHeader_ / validateDropGroup_ and the 2026-11-27 decisions): ER Applicable Y/N,
+  // default N (as legacy). When N, every ER field is hidden and cleared, Memory Knock-In is N and the
+  // header carries blank ER values (the server refuses Knock-In Y with ER N). When Y: Memory Knock-In Y/N;
+  // ER starts at period no. 1 to last - 1, saved as Start Month = n x coupon frequency (so always below the
+  // Term); ER Frequency is the coupon frequency, shown and not editable; ER Barrier % 0 or more.
+  // Barrier drop (switch): Drop % > 0; the drop start period must come AFTER the ER start period and be at
+  // most last - 1 (ER is never observed on the Final Fixing Date); it becomes a date as on the Coupon step;
+  // Floor % optional, 0 or more and not above the ER Barrier %.
+  function buildErStep() {
+    var s = el("div"), r = { e: {}, touched: {} };
+    add.r = r;
+    var g1 = el("div", "formgrid");
+    r.applies = ynPills("ER Applicable", "N", function (v) { setErApplies(v === "Y"); });
+    g1.appendChild(r.applies.node);
+    r.knockIn = ynPills("ER Memory Knock-In", "N", function () { renderStepBar(); });
+    r.knockIn.node.hidden = true;  // shown only when ER Applicable is Y
+    g1.appendChild(r.knockIn.node);
+    s.appendChild(block("Early Redemption (ER)", g1));
+    r.offNote = el("p", "muted small count", "ER fields are hidden. Set ER Applicable to Y if the note has an early redemption feature.");
+    s.appendChild(r.offNote);
+
+    r.box = el("div");
+    var g2 = el("div", "formgrid");
+    r.start = textInput({ inputmode: "numeric", maxlength: "3", autocomplete: "off" });
+    r.e.start = addField(g2, "ER starts at period no.", r.start, " ");
+    r.startLabel = r.start.parentNode.querySelector("label");
+    r.startNote = r.start.parentNode.querySelector(".fieldhint");
+    r.freq = textInput({ readonly: "readonly", tabindex: "-1" });
+    addField(g2, "ER Frequency", r.freq, "Always the coupon frequency.");
+    r.barrier = textInput({ inputmode: "decimal", maxlength: "10", autocomplete: "off" });
+    r.e.barrier = addField(g2, "ER Barrier %", r.barrier);
+    r.box.appendChild(block("ER conditions", g2));
+
+    r.dropPills = ynPills("Applicable", "N", function () { r.dropBox.hidden = r.dropPills.get() !== "Y"; refreshErErrors(); renderStepBar(); });
+    var g0 = el("div", "formgrid"); g0.appendChild(r.dropPills.node);
+    var sec = block("ER barrier drop", g0);
+    r.dropBox = el("div", "formgrid dropbox"); r.dropBox.hidden = true;
+    r.drop = textInput({ inputmode: "decimal", maxlength: "10", autocomplete: "off" });
+    r.e.drop = addField(r.dropBox, "ER Drop %", r.drop);
+    r.dstart = textInput({ inputmode: "numeric", maxlength: "3", autocomplete: "off" });
+    r.e.dstart = addField(r.dropBox, "ER drop starts at period no.", r.dstart, " ");
+    r.dstartLabel = r.dstart.parentNode.querySelector("label");
+    r.dstartNote = r.dstart.parentNode.querySelector(".fieldhint");
+    r.floor = textInput({ inputmode: "decimal", maxlength: "10", autocomplete: "off" });
+    r.e.floor = addField(r.dropBox, "ER Floor % (optional)", r.floor);
+    sec.appendChild(r.dropBox);
+    r.box.appendChild(sec);
+    r.box.appendChild(el("p", "muted small count", "ER is checked on coupon observation dates from the start period on, never on the Final Fixing Date. " +
+      "The drop must start after the ER start period; a date on a weekend or NYSE holiday moves to the next business day."));
+    r.box.hidden = true;
+    s.appendChild(r.box);
+
+    [["start", /\D/g], ["barrier", /[^\d.]/g], ["drop", /[^\d.]/g], ["dstart", /\D/g], ["floor", /[^\d.]/g]].forEach(function (p) {
+      var i = r[p[0]];
+      i.addEventListener("input", function () {
+        var v = i.value.replace(p[1], ""); if (v !== i.value) i.value = v;
+        showErErrors({}, p[0]); updateErNotes(); renderStepBar();
+      });
+      i.addEventListener("blur", function () { r.touched[p[0]] = true; refreshErErrors(); renderStepBar(); });
+    });
+    updateErNotes();
+    return s;
+  }
+
+  // Turning ER off clears every ER value (as the server would) and hides the fields.
+  function setErApplies(on) {
+    var r = add.r;
+    if (!on) {
+      r.knockIn.set("N"); r.dropPills.set("N"); r.dropBox.hidden = true;
+      ["start", "barrier", "drop", "dstart", "floor"].forEach(function (k) { r[k].value = ""; });
+      r.touched = {};
+    }
+    r.knockIn.node.hidden = !on;
+    r.box.hidden = !on;
+    r.offNote.hidden = on;
+    refreshErErrors(); renderStepBar();
+  }
+
+  function updateErNotes() {
+    var r = add.r, f = freqInfo(add.c.freq.value), unit = (f ? f.unit : "period").toLowerCase(), max = periodCount();
+    r.freq.value = f ? f.label : "Set on the Coupon step";
+    r.startLabel.textContent = "ER starts at " + unit + " no.";
+    r.dstartLabel.textContent = "ER drop starts at " + unit + " no.";
+    var n = r.start.value.trim(), d = /^\d+$/.test(n) && +n < max ? periodDate(+n) : null;
+    r.startNote.textContent = d ? "First ER date " + DateField.format(d) + "; saved as month " + (+n * f.months) + "." :
+      max > 1 ? "1 to " + (max - 1) + " for this term." : "";
+    var m = r.dstart.value.trim(), dd = /^\d+$/.test(m) && +m < max ? periodDate(+m) : null;
+    r.dstartNote.textContent = dd ? "Drop starts on " + DateField.format(dd) + "." :
+      max > 2 && /^\d+$/.test(n) && +n >= 1 && +n < max - 1 ? (+n + 1) + " to " + (max - 1) + " for this term." : "";
+  }
+
+  function erErrors() {
+    var r = add.r, e = {};
+    if (r.applies.get() !== "Y") return e;
+    var max = periodCount(), n = r.start.value.trim(), startOk = false;
+    if (!n) e.start = "The ER start period is required.";
+    else if (!max) e.start = "Choose the frequency (Coupon step) and complete the Term (Note step) first.";
+    else if (max < 2) e.start = "This term has only one period, the Final Fixing Date, so ER cannot apply. Set ER Applicable to N.";
+    else if (!(+n >= 1 && +n <= max - 1)) e.start = "The ER start period must be a whole number from 1 to " + (max - 1) + " (ER is never observed on the Final Fixing Date).";
+    else startOk = true;
+    var b = r.barrier.value.trim();
+    if (!b) e.barrier = "ER Barrier % is required.";
+    else if (!NUM_RE.test(b)) e.barrier = "ER Barrier % must be a number (0 or more).";
+    if (r.dropPills.get() === "Y") {
+      var dp = r.drop.value.trim();
+      if (!dp) e.drop = "ER Drop % is required when the ER barrier drops.";
+      else if (!NUM_RE.test(dp) || Number(dp) <= 0) e.drop = "ER Drop % must be a number greater than 0.";
+      var m = r.dstart.value.trim();
+      if (!m) e.dstart = "The ER drop start period is required when the ER barrier drops.";
+      else if (!max) e.dstart = "Choose the frequency (Coupon step) and complete the Term (Note step) first.";
+      else if (!(+m >= 1 && +m <= max - 1)) e.dstart = "The ER drop start period must be a whole number from 1 to " + Math.max(1, max - 1) + ".";
+      else if (startOk && +m <= +n) e.dstart = "The ER drop must start after the ER start period (" + n + "), so from period " + (+n + 1) + ".";
+      else {
+        var d = periodDate(+m), ifd = okDate(add.f.ifd), ffd = okDate(add.f.ffd);
+        if (!d || !ifd || !ffd) e.dstart = "The ER drop start date cannot be worked out yet: complete the Initial Fixing Date and Final Fixing Date (Note step) and the Roll Day (Coupon step).";
+        else if (d < ifd || d > ffd) e.dstart = "The ER drop start date (" + DateField.format(d) + ") must be between the Initial Fixing Date and the Final Fixing Date.";
+      }
+      var fl = r.floor.value.trim();
+      if (fl) {
+        if (!NUM_RE.test(fl)) e.floor = "ER Floor % must be a number (0 or more).";
+        else if (NUM_RE.test(b) && Number(fl) > Number(b)) e.floor = "ER Floor % cannot be above the ER Barrier %.";
+      }
+    }
+    return e;
+  }
+  function erErrorList() {
+    var e = erErrors(), list = Object.keys(e).map(function (k) { return e[k]; });
+    if (add.r.applies.get() === "Y" && add.r.dropPills.get() === "Y") { var cal = calendarProblem(); if (cal) list.unshift(cal); }
+    return list;
+  }
+  function refreshErErrors() {
+    var e = erErrors(), shown = {};
+    Object.keys(e).forEach(function (k) { if (add.r.touched[k] || add.showAll.er) shown[k] = e[k]; });
+    showErErrors(shown);
+    updateErNotes();
+  }
+  function showErErrors(e, only) {
+    var r = add.r;
+    ["start", "barrier", "drop", "dstart", "floor"].forEach(function (k) {
+      if (only && only !== k) return;
+      var m = e[k] || "";
+      r.e[k].textContent = m; r.e[k].hidden = !m;
+      r[k].classList.toggle("invalid", !!m);
+    });
+  }
+  function erDirty() {
+    var r = add.r;
+    return !!(r && r.applies.get() !== "N");
+  }
+  // The ER part of the note.add header, as legacy deriveStoredHeader sends it (Review step uses this).
+  function erHeader() {
+    var r = add.r, f = freqInfo(add.c.freq.value), blank = { earlyApplicable: "N", earlyMemoryKnockIn: "N",
+      earlyStartMonth: "", earlyFrequency: "", earlyBarrier: "", earlyDrop: "", earlyDropStartDate: "", earlyBarrierLimit: "" };
+    if (r.applies.get() !== "Y") return blank;
+    var drop = r.dropPills.get() === "Y", n = r.start.value.trim(), d = drop && /^\d+$/.test(r.dstart.value.trim()) ? periodDate(+r.dstart.value.trim()) : null;
+    return {
+      earlyApplicable: "Y",
+      earlyMemoryKnockIn: r.knockIn.get(),
+      earlyStartMonth: f && /^\d+$/.test(n) ? String(+n * f.months) : "",
+      earlyFrequency: f ? String(f.months) : "",
+      earlyBarrier: r.barrier.value.trim(),
+      earlyDrop: drop ? r.drop.value.trim() : "",
+      earlyDropStartDate: d ? DateField.format(d) : "",
+      earlyBarrierLimit: drop ? r.floor.value.trim() : ""
+    };
+  }
+
   function closeAddPopups() {
     if (add && add.f) ["ifd", "issue", "ffd", "red"].forEach(function (k) { if (add.f[k] && add.f[k].close) add.f[k].close(); });
     if (add && add.u) add.u.rows.forEach(function (r) { r.pickers.forEach(function (p) { p.close(); }); });
@@ -1243,7 +1414,7 @@
     host.appendChild(add.bar);
     ADD_STEPS.forEach(function (s) {
       var p = s[0] === "note" ? buildNoteStep() : s[0] === "underlyings" ? buildUnderlyingsStep() :
-        s[0] === "coupon" ? buildCouponStep() : placeholderPane(s[1]);
+        s[0] === "coupon" ? buildCouponStep() : s[0] === "er" ? buildErStep() : placeholderPane(s[1]);
       p.hidden = s[0] !== "note";
       add.panes[s[0]] = p;
       host.appendChild(p);
