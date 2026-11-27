@@ -64,7 +64,7 @@
     if (!PAGES[name]) name = "tasks";
     $("pageTitle").textContent = PAGES[name];
     var BODY = {
-      notes: "Look up a note by its ISIN. Read-only for now.",
+      notes: "Look up a note by its ISIN. You can add or remove its investments; other details are read-only for now.",
       investors: "Type to filter by ID, name or email. Open an investor to edit, or add a new one."
     };
     $("pageBody").textContent = BODY[name] || "Coming soon.";
@@ -73,7 +73,7 @@
     if (name === "notes") $("isin").focus();
     if (name === "investors") {
       $("invQuery").focus();
-      if (!investorsLoaded) loadInvestors();
+      if (!investorsLoaded) loadInvestors(); else filterInvestors();
     }
     var btns = document.querySelectorAll("#nav .navbtn");
     for (var i = 0; i < btns.length; i++) {
@@ -171,9 +171,10 @@
     return wrap;
   }
   function clearNote() { var r = $("noteResult"); while (r.firstChild) r.removeChild(r.firstChild); }
-  function resetNotes() { noteSeq++; clearNote(); $("isin").value = ""; $("isinBtn").disabled = false; }
+  function resetNotes() { noteSeq++; closeModifyPopups(); inv = null; noteData = null; clearNote(); $("isin").value = ""; $("isinBtn").disabled = false; }
 
   function renderNote(d) {
+    noteData = d; inv = null;
     var h = d.header || {}, profiles = d.profiles || [], byId = {}, out = $("noteResult");
     profiles.forEach(function (p) { byId[p["Investor ID"]] = p; });
     function who(id) {
@@ -199,8 +200,7 @@
     ])));
     out.appendChild(block("Underlyings", table("Underlyings", ["Company", "Exchange", "Ticker", "Buy price"],
       (d.underlyings || []).map(function (u) { return [u["Company Name"], u["Stock Exchange"], u.Ticker, u["Buy Price (Initial Fixing Level)"]]; }))));
-    out.appendChild(block("Investments", table("Investments", ["Investment ID", "Investor", "Amount", "NAV%", "Face value", "Start date"],
-      (d.investments || []).map(function (x) { return [x.Investment_ID, who(x["Investor ID"]), x.Amount, x["NAV%"], x["Face Value"], x["Start Date"]]; }))));
+    out.appendChild(investmentsSection());
     out.appendChild(block("Investors", table("Investors", ["Investor ID", "Name", "Email", "Contact", "WhatsApp", "Email consent", "WhatsApp consent", "Coupon consent", "ER consent", "Redemption consent"],
       profiles.map(function (p) {
         return [p["Investor ID"], (String(p["First Name"] || "") + " " + String(p["Last Name"] || "")).trim(), p["Email ID"],
@@ -208,6 +208,368 @@
           p["Email Consent"], p["WhatsApp Consent"], p["Communication Consent - Coupon Payout"],
           p["Communication Consent - Early Redemption Payout"], p["Communication Consent - Redemption Payout"]];
       }))));
+  }
+
+
+  // ---- Modify investments on the Notes page (note.modify: addInvestments, removeInvestmentIds) ----
+  // Rules agreed 2026-11-26: investor picked from the list; Amount > 0 with at most 2 decimals;
+  // NAV% > 0 with at most 6 decimals (default 100); Face Value = Amount x 100 / NAV%, shown to 2
+  // decimals; Start Date a real date, not after the Final Fixing Date; duplicates use the server key
+  // (investor, amount 2dp, NAV% 6dp, start date); at least one investment must remain, counting only
+  // kept existing rows and complete new rows; Remove marks the row with Undo until Save.
+  var noteData = null, inv = null; // inv: edit state while modifying, otherwise null
+
+  function noteWho(id) {
+    var ps = (noteData && noteData.profiles) || [];
+    for (var i = 0; i < ps.length; i++) {
+      if (ps[i]["Investor ID"] === id) return (String(ps[i]["First Name"] || "") + " " + String(ps[i]["Last Name"] || "")).trim() + " (" + id + ")";
+    }
+    return val(id);
+  }
+  function money(v) { var n = Number(v); return (v === "" || v == null || !isFinite(n)) ? val(v) : n.toFixed(2); }
+  function clearEl(e) { while (e.firstChild) e.removeChild(e.firstChild); }
+
+  function numCheck(text, label, places) {
+    var v = String(text == null ? "" : text).trim();
+    if (!v) return label + " is required.";
+    if (!/^\d+(\.\d+)?$/.test(v)) return label + " must be a number.";
+    if ((v.split(".")[1] || "").length > places) return label + " can have at most " + places + " decimals.";
+    if (Number(v) <= 0) return label + " must be greater than 0.";
+    return "";
+  }
+  function faceText(a, n) {
+    return (numCheck(a, "a", 2) || numCheck(n, "n", 6)) ? "" : (Number(a) * 100 / Number(n)).toFixed(2);
+  }
+  function investmentKey(investorId, amount, nav, startDate) {
+    var d = DateField.parse(startDate);
+    return [String(investorId || "").toUpperCase(), Number(amount).toFixed(2), Number(nav).toFixed(6), d ? DateField.format(d) : ""].join("|");
+  }
+
+  function notesDirty() { return !!inv && (inv.rows.length > 0 || Object.keys(inv.removed).length > 0); }
+  window.addEventListener("beforeunload", function (ev) { if (notesDirty()) { ev.preventDefault(); ev.returnValue = ""; } });
+
+  function closeModifyPopups() {
+    if (inv) inv.rows.forEach(function (r) { r.picker.close(); r.date.close(); });
+  }
+
+  function investmentsSection() {
+    var s = el("section", "block");
+    s.id = "invSection";
+    showInvestmentsView(s);
+    return s;
+  }
+  function blockHead(title, buttonText, onClick) {
+    var head = el("div", "blockhead");
+    head.appendChild(el("h3", null, title));
+    if (buttonText) {
+      var b = el("button", "secondary auto small", buttonText);
+      b.type = "button";
+      b.addEventListener("click", onClick);
+      head.appendChild(b);
+    }
+    return head;
+  }
+  function showInvestmentsView(s) {
+    clearEl(s);
+    s.appendChild(blockHead("Investments", "Modify investments", startModify));
+    s.appendChild(table("Investments", ["Investment ID", "Investor", "Amount", "NAV%", "Face value", "Start date"],
+      (noteData.investments || []).map(function (x) {
+        return [x.Investment_ID, noteWho(x["Investor ID"]), x.Amount, x["NAV%"], money(x["Face Value"]), x["Start Date"]];
+      })));
+  }
+
+  // The investor list for the picker comes from investor.list (shared with the Investors page).
+  async function ensureInvestors() {
+    if (investorsLoaded) return { ok: true };
+    var tok = token, r = await callApi("investor.list", { query: "" }, tok);
+    if (tok !== token) return { ok: false, stale: true };
+    if (r.ok && r.data && Array.isArray(r.data.investors)) { allInvestors = r.data.investors; investorsLoaded = true; return { ok: true }; }
+    return r;
+  }
+
+  async function startModify() {
+    if (!window.DateField || !window.InvestorPicker) {
+      setMsg("The date or investor field did not load. Hard refresh (Ctrl+Shift+R), and check that datefield.js and investorpick.js are on the site.", "err");
+      return;
+    }
+    var seq = noteSeq, tok = token, btn = this;
+    busy(btn, true); setMsg("Loading investors...");
+    var r = await ensureInvestors();
+    busy(btn, false);
+    if (seq !== noteSeq || tok !== token || r.stale) return;
+    if (!r.ok) {
+      if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
+      setMsg(errText(r.error), "err"); return;
+    }
+    setMsg("");
+    inv = { rows: [], removed: {}, ffd: String((noteData.header || {})["Final Fixing Date"] || "") };
+    renderModify($("invSection"));
+  }
+
+  function setInvMsg(text, cls, list) {
+    var m = $("invMsg");
+    clearEl(m);
+    m.className = cls || "";
+    if (text) m.appendChild(el("span", null, text));
+    if (list && list.length) {
+      var ul = el("ul", "errlist");
+      list.forEach(function (t) { ul.appendChild(el("li", null, t)); });
+      m.appendChild(ul);
+    }
+  }
+
+  function renderModify(s) {
+    clearEl(s);
+    s.appendChild(blockHead("Modify investments"));
+    s.appendChild(el("p", "muted small count",
+      "Add or remove investments for this note. Start Date cannot be after the Final Fixing Date (" + val(inv.ffd) + "). " +
+      "A removed investment stays in the sheet marked Removed. Nothing is saved until you press Save changes."));
+
+    var wrap = el("div", "tablewrap"), t = el("table", "edittable"), hr = el("tr"), tb = el("tbody");
+    t.setAttribute("aria-label", "Modify investments");
+    [["Investment ID", ""], ["Investor", "c-inv"], ["Amount", "c-amt"], ["NAV%", "c-nav"], ["Face value", "c-face"], ["Start date", "c-date"], ["", ""]]
+      .forEach(function (c) { var th = el("th", c[1] || null, c[0]); th.scope = "col"; hr.appendChild(th); });
+    var thead = el("thead"); thead.appendChild(hr); t.appendChild(thead);
+    tb.id = "invBody";
+    (noteData.investments || []).forEach(function (x) { tb.appendChild(existingRow(x)); });
+    t.appendChild(tb); wrap.appendChild(t); s.appendChild(wrap);
+
+    var add = el("button", "secondary auto small addrow", "+ New investment");
+    add.type = "button";
+    add.addEventListener("click", function () { addRow(true); });
+    s.appendChild(add);
+
+    var pending = el("p", "muted small count"); pending.id = "invPending"; s.appendChild(pending);
+    var m = el("div"); m.id = "invMsg"; m.setAttribute("role", "status"); s.appendChild(m);
+
+    var actions = el("div", "actions");
+    var save = el("button", "primary inline", "Save changes"); save.type = "button"; save.id = "invSave";
+    save.addEventListener("click", saveModify);
+    var cancel = el("button", "secondary auto", "Cancel"); cancel.type = "button";
+    cancel.addEventListener("click", cancelModify);
+    actions.appendChild(save); actions.appendChild(cancel);
+    s.appendChild(actions);
+
+    addRow(false);
+    updatePending();
+  }
+
+  function existingRow(x) {
+    var id = x.Investment_ID, tr = el("tr");
+    var idCell = el("td"); idCell.appendChild(el("span", "strike", val(id)));
+    var tag = el("span", "tag", "To be removed"); tag.hidden = true; idCell.appendChild(tag);
+    tr.appendChild(idCell);
+    [noteWho(x["Investor ID"]), x.Amount, x["NAV%"], money(x["Face Value"]), x["Start Date"]].forEach(function (v) {
+      var td = el("td"); td.appendChild(el("span", "strike", val(v))); tr.appendChild(td);
+    });
+    var act = el("td"), b = el("button", "link", "Remove");
+    b.type = "button";
+    b.setAttribute("aria-label", "Remove " + id);
+    b.addEventListener("click", function () { toggleRemove(id, tr, b, tag); });
+    act.appendChild(b); tr.appendChild(act);
+    return tr;
+  }
+
+  function remainingCount() {
+    var kept = (noteData.investments || []).filter(function (x) { return !inv.removed[x.Investment_ID]; }).length;
+    return kept + inv.rows.filter(function (r) { return !Object.keys(rowErrors(r)).length; }).length;
+  }
+
+  function toggleRemove(id, tr, b, tag) {
+    if (inv.removed[id]) {
+      delete inv.removed[id];
+    } else {
+      if (remainingCount() - 1 < 1) {
+        setInvMsg("At least one investment must remain. Complete a new investment first if you want to replace this one.", "err");
+        return;
+      }
+      inv.removed[id] = true;
+    }
+    var on = !!inv.removed[id];
+    tr.classList.toggle("removing", on);
+    tag.hidden = !on;
+    b.textContent = on ? "Undo" : "Remove";
+    b.setAttribute("aria-label", (on ? "Undo removing " : "Remove ") + id);
+    setInvMsg("");
+    updatePending();
+  }
+
+  function cellInput(cls, attrs) {
+    var i = el("input", "cell " + cls);
+    Object.keys(attrs || {}).forEach(function (k) { i.setAttribute(k, attrs[k]); });
+    return i;
+  }
+  function errSpan() { var e = el("span", "cellerr"); e.hidden = true; return e; }
+
+  function addRow(focus) {
+    var r = {}, tr = el("tr", "newrow");
+    r.tr = tr;
+    r.idCell = el("td"); r.idCell.appendChild(el("span", "badge newbadge", "New"));
+    tr.appendChild(r.idCell);
+
+    var tdI = el("td", "c-inv"), pin = cellInput("pickinput", { "aria-label": "Investor" });
+    r.eInv = errSpan(); tdI.appendChild(pin); tdI.appendChild(r.eInv); tr.appendChild(tdI);
+
+    var tdA = el("td", "c-amt");
+    r.amount = cellInput("num", { inputmode: "decimal", maxlength: "18", autocomplete: "off", "aria-label": "Amount" });
+    r.eAmt = errSpan(); tdA.appendChild(r.amount); tdA.appendChild(r.eAmt); tr.appendChild(tdA);
+
+    var tdN = el("td", "c-nav");
+    r.nav = cellInput("num", { inputmode: "decimal", maxlength: "12", autocomplete: "off", "aria-label": "NAV%" });
+    r.nav.value = "100";
+    r.eNav = errSpan(); tdN.appendChild(r.nav); tdN.appendChild(r.eNav); tr.appendChild(tdN);
+
+    var tdF = el("td", "c-face");
+    r.face = cellInput("num", { readonly: "readonly", tabindex: "-1", "aria-label": "Face value (calculated)" });
+    tdF.appendChild(r.face); tr.appendChild(tdF);
+
+    var tdD = el("td", "c-date"), din = cellInput("", {});
+    r.eDate = errSpan(); tdD.appendChild(din); tdD.appendChild(r.eDate); tr.appendChild(tdD);
+
+    var tdX = el("td"), del = el("button", "link", "Delete");
+    del.type = "button";
+    del.addEventListener("click", function () { deleteRow(r); });
+    tdX.appendChild(del); tr.appendChild(tdX);
+
+    $("invBody").appendChild(tr);
+    r.picker = InvestorPicker.attach(pin, { source: function () { return allInvestors; }, loaded: function () { return investorsLoaded; } });
+    r.date = DateField.attach(din, { label: "Start Date", required: true, max: inv.ffd || null, maxLabel: "the Final Fixing Date" });
+    din.setAttribute("aria-label", "Start Date");
+
+    function refreshFace() { r.face.value = faceText(r.amount.value, r.nav.value); }
+    [r.amount, r.nav].forEach(function (i) {
+      i.addEventListener("input", function () {
+        var c = i.value.replace(/[^\d.]/g, "");
+        if (c !== i.value) i.value = c;
+        refreshFace(); showRowErrors(r, {}, i === r.amount ? "amount" : "nav");
+      });
+    });
+    r.amount.addEventListener("blur", function () { showRowErrors(r, rowErrors(r), "amount"); updatePending(); });
+    r.nav.addEventListener("blur", function () { showRowErrors(r, rowErrors(r), "nav"); updatePending(); });
+    pin.addEventListener("investorchange", function () { showRowErrors(r, rowErrors(r), "investor"); updatePending(); });
+    din.addEventListener("datechange", function () { showRowErrors(r, rowErrors(r), "date"); updatePending(); });
+
+    inv.rows.push(r);
+    renumber();
+    refreshFace();
+    updatePending();
+    if (focus) pin.focus();
+  }
+
+  function deleteRow(r) {
+    r.picker.close(); r.date.close();
+    inv.rows.splice(inv.rows.indexOf(r), 1);
+    r.tr.parentNode.removeChild(r.tr);
+    renumber(); setInvMsg(""); updatePending();
+  }
+  function renumber() {
+    inv.rows.forEach(function (r, i) { r.no = i + 1; r.idCell.firstChild.textContent = "New " + r.no; });
+  }
+
+  function rowErrors(r) {
+    var e = {}, a = numCheck(r.amount.value, "Amount", 2), n = numCheck(r.nav.value, "NAV%", 6), d = r.date.check();
+    if (!r.picker.getId()) e.investor = "Investor is required.";
+    if (a) e.amount = a;
+    if (n) e.nav = n;
+    if (d) e.date = d;
+    return e;
+  }
+  // Shows the errors for one field (only) or for every field of the row.
+  function showRowErrors(r, e, only) {
+    [["investor", r.eInv, function (m) { r.picker.setError(m); }],
+     ["amount", r.eAmt, function (m) { r.amount.classList.toggle("invalid", !!m); }],
+     ["nav", r.eNav, function (m) { r.nav.classList.toggle("invalid", !!m); }],
+     ["date", r.eDate, function (m) { r.date.setError(m); }]].forEach(function (f) {
+      if (only && only !== f[0]) return;
+      var m = e[f[0]] || "";
+      f[1].textContent = m; f[1].hidden = !m; f[2](m);
+    });
+  }
+
+  function updatePending() {
+    if (!inv) return;
+    var a = inv.rows.length, rm = Object.keys(inv.removed).length, p = [];
+    if (a) p.push(a + (a === 1 ? " investment" : " investments") + " to add");
+    if (rm) p.push(rm + " to remove (" + Object.keys(inv.removed).join(", ") + ")");
+    $("invPending").textContent = p.length ? "Pending: " + p.join("; ") + "." : "No changes yet.";
+  }
+
+  function cancelModify() {
+    if (notesDirty() && !confirm("Discard your unsaved investment changes?")) return;
+    closeModifyPopups();
+    inv = null;
+    showInvestmentsView($("invSection"));
+  }
+
+  // Server messages number the new investments "Investment row N"; the screen calls them "New N".
+  function screenText(msg) { return String(msg || "").replace(/Investment row (\d+)/g, "New investment $1"); }
+
+  async function saveModify() {
+    var errs = [], removeIds = Object.keys(inv.removed);
+    if (!inv.rows.length && !removeIds.length) { setInvMsg("No changes to save."); return; }
+
+    inv.rows.forEach(function (r) {
+      var e = rowErrors(r);
+      showRowErrors(r, e);
+      Object.keys(e).forEach(function (k) { errs.push("New investment " + r.no + ": " + e[k]); });
+    });
+    if (!errs.length) {
+      var existing = {}, seen = {};
+      (noteData.investments || []).forEach(function (x) {
+        if (!inv.removed[x.Investment_ID]) existing[investmentKey(x["Investor ID"], x.Amount, x["NAV%"], x["Start Date"])] = x.Investment_ID;
+      });
+      inv.rows.forEach(function (r) {
+        var k = investmentKey(r.picker.getId(), r.amount.value, r.nav.value, r.date.getValue());
+        if (existing[k]) errs.push("New investment " + r.no + " matches " + existing[k] + " (same investor, amount, NAV% and start date).");
+        else if (seen[k]) errs.push("New investment " + r.no + " matches new investment " + seen[k] + " (same investor, amount, NAV% and start date).");
+        else seen[k] = r.no;
+      });
+    }
+    if (!errs.length && remainingCount() < 1) errs.push("At least one investment must remain on the note.");
+    if (errs.length) { setInvMsg("Please correct the following:", "err", errs); return; }
+
+    if (removeIds.length) {
+      var names = removeIds.map(function (id) {
+        var x = (noteData.investments || []).filter(function (y) { return y.Investment_ID === id; })[0];
+        return id + (x ? " (" + noteWho(x["Investor ID"]) + ")" : "");
+      });
+      if (!confirm("Remove " + names.join(", ") + "?\n\nThe investment stays in the sheet marked Removed. Its payouts, charges and messages are kept but no longer shown or processed.")) return;
+    }
+
+    var isin = String((noteData.header || {}).ISIN || "").toUpperCase(), seq = noteSeq, tok = token, btn = $("invSave");
+    var p = { isin: isin };
+    if (inv.rows.length) {
+      p.addInvestments = inv.rows.map(function (r) {
+        return { investorId: r.picker.getId(), amount: Number(r.amount.value), nav: Number(r.nav.value), startDate: r.date.getValue() };
+      });
+    }
+    if (removeIds.length) p.removeInvestmentIds = removeIds;
+
+    busy(btn, true); setInvMsg("Saving...");
+    var r = await callApi("note.modify", p, tok);
+    if (seq !== noteSeq || tok !== token || !inv) return;
+    if (!r.ok) {
+      busy(btn, false);
+      if (r.error && r.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
+      if (r.error && r.error.code === "NETWORK_ERROR") {
+        setInvMsg("Could not confirm the save. Search for " + isin + " again to see whether the change went through before trying again.", "err");
+        return;
+      }
+      setInvMsg(screenText(errText(r.error)), "err");
+      return;
+    }
+    var done = String(r.data && r.data.message || "Saved.");
+    if (removeIds.length && r.data && typeof r.data.removed === "number" && r.data.removed !== removeIds.length) {
+      done += " " + r.data.removed + " of " + removeIds.length + " removals applied; the others were already removed.";
+    }
+    closeModifyPopups();
+    inv = null;
+    var g = await callApi("note.get", { isin: isin }, tok);
+    if (seq !== noteSeq || tok !== token) return;
+    if (g.ok && g.data) { renderNote(g.data); setMsg(done, "ok"); return; }
+    if (g.error && g.error.code === "UNAUTHENTICATED") { sessionEnded(); return; }
+    showInvestmentsView($("invSection"));
+    setMsg(done + " The note could not be refreshed; search for it again.", "ok");
   }
 
   var investorSeq = 0, investorsLoaded = false, allInvestors = [];
@@ -496,6 +858,7 @@
 
   $("isinForm").addEventListener("submit", async function (ev) {
     ev.preventDefault();
+    if (notesDirty() && !confirm("Discard your unsaved investment changes?")) return;
     var isin = $("isin").value.trim().toUpperCase();
     $("isin").value = isin;
     if (!/^[A-Z0-9]{12}$/.test(isin)) { setMsg("Enter a 12-character ISIN (letters and digits).", "err"); return; }
@@ -612,6 +975,7 @@
   });
 
   $("logoutBtn").addEventListener("click", async function () {
+    if (notesDirty() && !confirm("Discard your unsaved investment changes and sign out?")) return;
     var btn = $("logoutBtn");
     busy(btn, true);
     if (token) await callApi("auth.logout", {}, token);
