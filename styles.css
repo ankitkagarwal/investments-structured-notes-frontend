@@ -440,3 +440,4 @@ button.stepbtn.err .stepdot { background: var(--err); }
 .rowno { display: inline-block; padding-top: 10px; color: var(--muted); }
 .dropbox { margin-top: 14px; padding: 14px; background: var(--page); border: 1px dashed var(--line); border-radius: 6px; }
 .fieldhint:empty { display: none; }
+.field input[readonly] { color: var(--muted); background: var(--page); cursor: default; }
